@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: luminaul-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-luminaul}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Semillado automático en la primera inicialización:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
+    networks:
+      - luminaul-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-luminaul}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: https://github.com/LuminaUL-Grupo3/luminaul-new-backend.git#${BACKEND_BRANCH:-main}
+    image: luminaul-backend:production
+    container_name: luminaul-backend
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-luminaul}
+      JWT_SECRET: ${JWT_SECRET:-super-secret-key-luminaul-development-2026}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-86400}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - luminaul-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build: https://github.com/LuminaUL-Grupo3/luminaul-frontend.git#${FRONTEND_BRANCH:-main}
+    image: luminaul-frontend:production
+    container_name: luminaul-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - luminaul-net
+
+volumes:
+  postgres_data:
+    name: luminaul-postgres-data
+
+networks:
+  luminaul-net:
+    name: luminaul-network
+    driver: bridge
+
