@@ -14,11 +14,6 @@ Orquesta la arquitectura de producción mediante **Docker Compose**, **Caddy 2**
 * **Docker Engine:** Versión 24 o superior.
 * **Docker Compose Plugin:** Versión 2.20 o superior.
 * **Memoria SWAP:** En instancias con 1 GB o 2 GB de RAM (`t3.small` / `t2.micro`), es **obligatorio configurar 4 GB de SWAP** antes de compilar para evitar congelamientos por Out-of-Memory.
-* **Seguridad de Red (OWASP / CIS):**
-  - **IMDSv2 Obligatorio:** Mitigación de ataques SSRF contra metadatos de AWS.
-  - **Rotación de Logs:** Docker daemon configurado con límite de 30 MB (`json-file`) para prevenir saturación del disco EBS.
-  - **Reverse Proxy Caddy:** HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, y cabeceras `X-Forwarded-For` para soporte de `trust proxy` en NestJS.
-  - **Base de Datos Aislada:** PostgreSQL (`DATABASE_SSL=false`) opera estrictamente en la red interna privada de Docker (`luminaul-net`), sin exposición a internet.
 
 ---
 
