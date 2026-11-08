@@ -1,60 +1,93 @@
-# LuminaUL - Repositorio de Despliegue y Orquestación Docker
+# LuminaUL - Repositorio de Despliegue y Orquestación Cloud (Producción)
 
-Repositorio oficial de infraestructura, contenedores y despliegue continuo para la plataforma **LuminaUL** (Universidad de Lima).
+Repositorio oficial de infraestructura, contenedores y despliegue continuo de grado de industria para la plataforma **LuminaUL** (Universidad de Lima).
 
-Este repositorio orquesta la arquitectura de producción mediante **Docker Compose**, **Caddy 2** (Reverse Proxy + TLS automático con Let's Encrypt), **PostgreSQL 16** y **NestJS 12**.
+Orquesta la arquitectura de producción mediante **Docker Compose**, **Caddy 2** (Reverse Proxy + TLS automático con Let's Encrypt), **PostgreSQL 16** y **NestJS 12**.
 
 * **Backend:** [LuminaUL-Grupo3/luminaul-new-backend](https://github.com/LuminaUL-Grupo3/luminaul-new-backend)
-* **Frontend:** [LuminaUL-Grupo3/luminaul-frontend](https://github.com/LuminaUL-Grupo3/luminaul-frontend)
+* **Frontend (PWA):** [LuminaUL-Grupo3/luminaul-frontend](https://github.com/LuminaUL-Grupo3/luminaul-frontend)
 
 ---
 
-## 1. Requisitos Previos
+## 1. Arquitectura de Producción
 
-* **Docker Engine:** Versión 24 o superior.
-* **Docker Compose Plugin:** Versión 2.20 o superior.
-* **Memoria SWAP:** En servidores con 1 GB o 2 GB de RAM (como AWS EC2 `t3.small` o `t2.micro`), es **obligatorio configurar 4 GB de SWAP** antes de compilar para evitar bloqueos por falta de memoria.
-
----
-
-## 2. Puesta en Marcha en Producción
-
-### Opción A: Despliegue 100% Automatizado con AWS CloudFormation (Recomendado - Cero `nano`)
-Si despliegas en AWS Academy, utiliza la plantilla [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.yaml):
-1. En la consola de AWS, ve a **CloudFormation** $\rightarrow$ **Create stack** (with new resources) $\rightarrow$ **Upload a template file** y sube `luminaul-cloudformation.yaml`.
-2. CloudFormation te presentará un formulario interactivo pidiendo los parámetros:
-   * **Red y Dominio:** Subdominio y Token de DuckDNS, y Key Pair (`.pem`).
-   * **Seguridad:** Contraseña de PostgreSQL (`DB_PASSWORD`), Secreto JWT (`JWT_SECRET`), y transporte de correo.
-   * **Ramas de GitHub:** Ramas de Frontend y Backend (ej. `main` o `feature/mobile-PWA`).
-3. Haz clic en **Create stack**. CloudFormation creará el Security Group, la instancia EC2 con 4 GB de SWAP, Docker, generará el archivo `.env` automáticamente con tus parámetros, compilará los contenedores y levantará LuminaUL en HTTPS sin que tengas que usar `nano`.
+* **Modo Estricto de Producción:** `NODE_ENV=production` enforzado en todas las capas.
+* **Correo Transaccional Real:** `MAIL_TRANSPORT=smtp` obligatorio para el despacho de códigos OTP de autenticación institucional.
+* **Seguridad de Red (OWASP / CIS):**
+  - **IMDSv2 Obligatorio:** Mitigación de ataques SSRF contra metadatos de AWS.
+  - **Rotación de Logs:** Docker daemon configurado con límite de 30 MB (`json-file`) para prevenir la saturación del disco EBS.
+  - **Reverse Proxy Caddy:** HSTS (1 año + preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, y cabeceras `X-Forwarded-For` para soporte nativo de `trust proxy` en NestJS.
+  - **Base de Datos Aislada:** PostgreSQL (`DATABASE_SSL=false`) opera estrictamente en la red interna privada de Docker (`luminaul-net`), sin exposición a internet.
+* **Frontend PWA Móvil:** Progressive Web App instalable con soporte offline y banner interactivo exclusivo para celulares y tablets (Android e iOS).
 
 ---
 
-### Opción B: Puesta en Marcha Manual por SSH
+## 2. Despliegue en AWS Academy (Elige tu Opción)
 
-#### 2.1 Configuración de Variables de Entorno (.env)
-Copia la plantilla y configura tus credenciales reales:
+### Opción A: Despliegue Automatizado con CloudFormation (Recomendado - Cero `nano`)
+
+Utiliza la plantilla de grado de industria [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.yaml). CloudFormation creará toda la infraestructura y te solicitará los parámetros en un formulario web visual:
+
+1. En la consola de AWS, dirígete a **CloudFormation** $\rightarrow$ **Create stack** (with new resources) $\rightarrow$ **Upload a template file** y sube `luminaul-cloudformation.yaml`.
+2. Completa los campos en el asistente visual de AWS:
+   * **1. Red y Dominio Público:**
+     * `DuckDnsSubdomain`: Tu subdominio en DuckDNS (ej: `luminaul`).
+     * `DuckDnsToken`: Tu token secreto de DuckDNS *(campo oculto)*.
+     * `KeyName`: Tu par de claves EC2 (`.pem`).
+   * **2. Correo Transaccional Real (SMTP):**
+     * `SmtpUser`: Tu correo emisor (ej: `tu-cuenta@gmail.com`).
+     * `SmtpPassword`: Contraseña de aplicación de 16 caracteres de Google *(campo oculto)*.
+     * `SmtpHost`: `smtp.gmail.com` (por defecto).
+     * `SmtpPort`: `587` (por defecto).
+     * `SmtpSecure`: `false` (por defecto para puerto 587 con STARTTLS).
+     * `MailFrom`: `LuminaUL Soporte <soporte@luminaul.pe>`.
+   * **3. Ramas de GitHub:**
+     * `FrontendBranch`: `main` (o rama específica como `feature/mobile-PWA`).
+     * `BackendBranch`: `main`.
+3. Haz clic en **Create stack**.
+4. **Listo.** En ~4 minutos, CloudFormation:
+   * Crea el Security Group y la instancia EC2 con 30 GB gp3 y 4 GB de SWAP.
+   * Genera el archivo `.env` automáticamente con permisos seguros (`chmod 600`).
+   * Registra la IP en DuckDNS, compila los contenedores e inicializa LuminaUL en HTTPS con certificado TLS oficial.
+
+---
+
+### Opción B: Despliegue Manual por SSH
+
+Si prefieres aprovisionar manualmente dentro de una instancia Ubuntu 24.04 LTS:
+
+#### 2.1 Preparar Memoria SWAP de 4GB
 ```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+#### 2.2 Clonar y Configurar `.env`
+```bash
+git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
+cd luminaul-docker
 cp .env.production.example .env
 nano .env
 ```
 
-Parámetros clave a configurar en `.env`:
-* `DOMAIN=luminaul.duckdns.org` (o tu dominio público).
-* `DUCKDNS_SUBDOMAIN=luminaul` y `DUCKDNS_TOKEN=tu-token` (para resolución dinámica de IP en AWS Academy).
-* `WEB_ORIGIN=https://luminaul.duckdns.org,http://luminaul.duckdns.org,http://localhost,https://localhost`.
-* `JWT_SECRET` (mínimo 32 caracteres aleatorios en producción).
-* `MAIL_TRANSPORT=console` (para ver códigos OTP en los logs) o `smtp` (para envíos reales).
+Configura tus credenciales reales en `.env`:
+* `DOMAIN=luminaul.duckdns.org`
+* `DUCKDNS_SUBDOMAIN=luminaul` y `DUCKDNS_TOKEN=tu-token`
+* `MAIL_TRANSPORT=smtp` con tus credenciales `SMTP_USER` y `SMTP_PASSWORD`
+* `JWT_SECRET` (mínimo 32 caracteres)
 
-### 2.2 Compilar e Iniciar los Servicios (Compilación Secuencial Segura)
+#### 2.3 Compilación Secuencial Segura
 > [!IMPORTANT]
-> En servidores de nube pequeños, **compila siempre los servicios uno por uno** de forma secuencial. Compilarlos en paralelo satura la CPU y puede congelar la conexión SSH.
+> En servidores pequeños (`t3.small` / `t2.micro`), **compila siempre los servicios uno por uno**. Compilar en paralelo satura el procesador y puede congelar la sesión SSH.
 
 ```bash
-# 1. Compilar el backend NestJS (~20 segundos)
+# 1. Compilar backend NestJS
 docker compose build backend
 
-# 2. Compilar el frontend React 19 + Caddy (~40 segundos)
+# 2. Compilar frontend React 19 + Caddy
 docker compose build frontend
 
 # 3. Levantar los 3 contenedores en segundo plano
@@ -67,91 +100,81 @@ docker compose up -d
 
 | Servicio | URL / Puerto | Descripción |
 | :--- | :--- | :--- |
-| **Frontend Web (HTTPS)** | `https://<tu-subdominio>.duckdns.org` (:443) | Aplicación React 19 servida por Caddy con **certificado TLS oficial de Let's Encrypt (candado verde)** |
-| **Frontend Web (HTTP)** | `http://<tu-subdominio>.duckdns.org` (:80) | Redirección automática a HTTPS y validación de desafíos ACME |
-| **API REST Backend** | `/api/*` (enrutado por Caddy al backend :8000) | Endpoints de NestJS (Auth, Perfiles, Posts, Reviews, Admin) |
-| **WebSockets Chat** | `/socket.io/*` (enrutado por Caddy con WSS) | Pasarela de mensajería grupal en tiempo real (SPEC-04) |
-| **Swagger UI Docs** | `https://<tu-subdominio>.duckdns.org/api/docs` | Documentación interactiva de OpenAPI |
-| **PostgreSQL 16** | Puerto interno `5432` (oculto en red interna) | Base de datos relacional inicializada automáticamente con 22 tablas y 52 cursos |
+| **Frontend PWA (HTTPS)** | `https://<subdominio>.duckdns.org` (:443) | Aplicación React 19 servida por Caddy con **TLS oficial Let's Encrypt (candado verde)** |
+| **Frontend (HTTP)** | `http://<subdominio>.duckdns.org` (:80) | Redirección 301 automática a HTTPS y validación ACME |
+| **API REST Backend** | `/api/*` (enrutado a NestJS :8000) | Endpoints de negocio (Auth, Perfil, Posts, Reseñas, Moderación, Admin) |
+| **WebSockets Chat** | `/socket.io/*` (WSS en tiempo real) | Pasarela de chat grupal con control anti-spam (SPEC-04) |
+| **Swagger UI** | `https://<subdominio>.duckdns.org/api/docs` | Documentación interactiva de la API |
+| **PostgreSQL 16** | Puerto interno `5432` | Base de datos relacional aislada en la red privada de Docker |
 
 ---
 
-## 4. ¿Cómo actualizar cuando hay cambios nuevos en `main`?
+## 4. Instalación como PWA en Dispositivos Móviles
 
-Cuando tú o tu equipo suban nuevos commits o features a la rama `main` en GitHub, actualiza el servidor ejecutando estos 3 comandos:
+LuminaUL incluye soporte PWA completo con un banner interactivo que **se activa exclusivamente en smartphones y tablets táctiles**:
+
+* **En Android (Google Chrome):**  
+  Aparece el banner inferior *"Instala LuminaUL - Acceso rápido sin abrir navegador"*. Al presionar el botón **"Instalar"**, el navegador abre el diálogo nativo de instalación en el dispositivo.
+* **En iPhone / iPad (Safari iOS):**  
+  Muestra las instrucciones guiadas: *"Toca Compartir [↑] y luego 'Añadir a inicio' ➕"*.
+* **En PC / Laptops con mouse:**  
+  El banner se apaga automáticamente para no ser invasivo.
+
+---
+
+## 5. ¿Cómo actualizar cuando hay cambios nuevos en GitHub?
+
+Cuando subas nuevos commits a las ramas de producción:
 
 ```bash
 cd /home/ubuntu/luminaul-docker
 
-# 1. Descarga el commit más reciente y compila el backend
-docker compose build --pull backend
+# 1. Reconstruir el backend sin caché
+docker compose build --no-cache backend
 
-# 2. Descarga el commit más reciente y compila el frontend
-docker compose build --pull frontend
+# 2. Reconstruir el frontend sin caché (especificando rama si usas una distinta a main)
+FRONTEND_BRANCH=feature/mobile-PWA docker compose build --no-cache frontend
 
-# 3. Aplica los cambios y reinicia los contenedores (tarda 2 segundos)
-docker compose up -d
-```
-
-### Ventajas de este flujo:
-* **`--pull`:** Garantiza que Docker descargue el commit más reciente de GitHub sin tener que clonar repositorios manualmente.
-* **Secuencial y estable:** Al compilar primero uno y luego el otro, la memoria RAM nunca supera los límites del servidor.
-* **Cero pérdida de datos:** La base de datos PostgreSQL, los volúmenes persistentes y los certificados TLS se conservan intactos.
-
----
-
-## 5. Arranque Automático en AWS Academy (Systemd + DuckDNS)
-
-AWS Academy reasigna la dirección IP pública cada vez que inicias el laboratorio. Para que el servidor reporte su nueva IP a DuckDNS y levante los contenedores automáticamente al encender:
-
-```bash
-sudo bash -c 'cat << "EOF" > /etc/systemd/system/luminaul.service
-[Unit]
-Description=LuminaUL Docker Compose Application
-Requires=docker.service
-After=docker.service network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/home/ubuntu/luminaul-docker
-User=ubuntu
-Group=docker
-ExecStartPre=/bin/bash -c "set -a; [ -f /home/ubuntu/luminaul-docker/.env ] && . /home/ubuntu/luminaul-docker/.env; set +a; IP=\$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n \"\$IP\" ] && [ -n \"\$DUCKDNS_TOKEN\" ]; then curl -s \"https://www.duckdns.org/update?domains=\${DUCKDNS_SUBDOMAIN:-luminaul}&token=\$DUCKDNS_TOKEN&ip=\$IP\"; sleep 5; fi"
-ExecStart=/usr/bin/docker compose up -d
-ExecStop=/usr/bin/docker compose down
-TimeoutStartSec=0
-
-[Install]
-WantedBy=multi-user.target
-EOF'
-
-sudo systemctl daemon-reload
-sudo systemctl enable luminaul.service
-sudo systemctl enable docker
+# 3. Reiniciar contenedores
+docker compose up -d backend frontend
 ```
 
 ---
 
-## 6. Comandos Útiles de Operación y Diagnóstico
+## 6. Procedimiento para Apagar y Reanudar el Laboratorio (AWS Academy)
+
+### Para Apagar (Evitar consumo de créditos):
+> [!CAUTION]
+> **NO ejecutes `docker compose down`** al salir. Si por descuido escribieras `docker compose down -v`, eliminarías los volúmenes de PostgreSQL y los certificados SSL de Caddy.
+* Simplemente haz clic en **"End Lab"** en el portal de AWS Academy (o ve a la consola de AWS $\rightarrow$ EC2 $\rightarrow$ **Stop instance**).
+* Linux enviará una señal limpia de apagado a Docker cerrando transacciones sin corrupción de datos.
+
+### Para Reanudar el Laboratorio:
+1. Haz clic en **"Start Lab"** en el portal de AWS Academy.
+2. Espera ~2 minutos a que el círculo se ponga verde.
+3. El servicio automático `luminaul.service` detectará la nueva IP asignada por AWS, actualizará DuckDNS y levantará los contenedores automáticamente.
+4. Ingresas directo a `https://<tu-subdominio>.duckdns.org`.
+
+---
+
+## 7. Comandos de Diagnóstico y Operación
 
 ```bash
-# Ver el estado y healthchecks de los contenedores
+# Ver estado y healthchecks de los contenedores
 docker compose ps
 
 # Ver logs de emisión de certificados TLS en Caddy
 docker compose logs -f frontend
 
-# Ver logs del backend (incluye códigos OTP cuando MAIL_TRANSPORT=console)
+# Ver logs del backend NestJS
 docker compose logs -f backend
 
-# Reiniciar únicamente el servidor web Caddy (si cambias el Caddyfile)
+# Reiniciar únicamente Caddy tras editar Caddyfile
 docker compose restart frontend
 
 # Detener los servicios preservando todos los datos
-docker compose down
+docker compose stop
 
-# Reiniciar completamente la base de datos limpia desde cero (borra datos)
+# Reconstruir base de datos limpia desde cero (¡BORRA DATOS!)
 docker compose down -v && docker compose up -d
 ```
