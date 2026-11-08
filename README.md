@@ -48,7 +48,7 @@ Una vez iniciados los contenedores:
 | :--- | :--- | :--- |
 | **Frontend Web** | `http://localhost` (puertos 80 y 5173) | Aplicación React 19 servida por Nginx con soporte SPA y proxy reverso |
 | **API REST Backend** | `http://localhost:8000` | Endpoints de NestJS |
-| **Swagger UI** | `http://localhost:8000/docs` | Documentación interactiva de la API |
+| **Swagger UI** | `http://localhost:8000/api/docs` | Documentación interactiva de la API (toda la API REST vive bajo `/api`) |
 | **PostgreSQL 16** | `localhost:5432` | Base de datos relacional inicializada automáticamente |
 
 ---
