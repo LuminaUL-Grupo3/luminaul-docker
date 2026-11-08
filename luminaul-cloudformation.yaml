@@ -133,25 +133,10 @@ Resources:
           sed -i "s|^DUCKDNS_TOKEN=.*|DUCKDNS_TOKEN=${DuckDnsToken}|" .env
           sed -i "s|^WEB_ORIGIN=.*|WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost|" .env
 
-          cat << 'EOF_CADDY' > Caddyfile
-          ${DuckDnsSubdomain}.duckdns.org {
-          	encode gzip
-
-          	handle /api* {
-          		reverse_proxy backend:8000
-          	}
-
-          	handle /socket.io* {
-          		reverse_proxy backend:8000
-          	}
-
-          	handle {
-          		root * /srv
-          		try_files {path} /index.html
-          		file_server
-          	}
-          }
-          EOF_CADDY
+          # Actualizar el Caddyfile descargado del repositorio con el subdominio DuckDNS
+          if [ -f Caddyfile ]; then
+            sed -i "s|{\$DOMAIN:localhost}|${DuckDnsSubdomain}.duckdns.org|g" Caddyfile
+          fi
 
           # 5. Registrar IP inicial en DuckDNS
           echo "--> [5/7] Reportando IP actual a DuckDNS..."
