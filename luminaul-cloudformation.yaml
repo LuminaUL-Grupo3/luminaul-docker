@@ -172,10 +172,8 @@ Resources:
           systemctl enable luminaul.service
           systemctl enable docker
 
-          # 7. Compilar de forma secuencial (evita saturar CPU/RAM) y levantar servicios
+          # 7. Compilar y levantar contenedores
           echo "--> [7/7] Compilando y levantando contenedores Docker..."
-          docker compose build backend
-          docker compose build frontend
           systemctl start luminaul.service
 
           echo "=========================================================="
