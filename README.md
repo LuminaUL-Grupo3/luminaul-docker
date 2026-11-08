@@ -19,7 +19,20 @@ Este repositorio orquesta la arquitectura de producción mediante **Docker Compo
 
 ## 2. Puesta en Marcha en Producción
 
-### 2.1 Configuración de Variables de Entorno (.env)
+### Opción A: Despliegue 100% Automatizado con AWS CloudFormation (Recomendado - Cero `nano`)
+Si despliegas en AWS Academy, utiliza la plantilla [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.yaml):
+1. En la consola de AWS, ve a **CloudFormation** $\rightarrow$ **Create stack** (with new resources) $\rightarrow$ **Upload a template file** y sube `luminaul-cloudformation.yaml`.
+2. CloudFormation te presentará un formulario interactivo pidiendo los parámetros:
+   * **Red y Dominio:** Subdominio y Token de DuckDNS, y Key Pair (`.pem`).
+   * **Seguridad:** Contraseña de PostgreSQL (`DB_PASSWORD`), Secreto JWT (`JWT_SECRET`), y transporte de correo.
+   * **Ramas de GitHub:** Ramas de Frontend y Backend (ej. `main` o `feature/mobile-PWA`).
+3. Haz clic en **Create stack**. CloudFormation creará el Security Group, la instancia EC2 con 4 GB de SWAP, Docker, generará el archivo `.env` automáticamente con tus parámetros, compilará los contenedores y levantará LuminaUL en HTTPS sin que tengas que usar `nano`.
+
+---
+
+### Opción B: Puesta en Marcha Manual por SSH
+
+#### 2.1 Configuración de Variables de Entorno (.env)
 Copia la plantilla y configura tus credenciales reales:
 ```bash
 cp .env.production.example .env

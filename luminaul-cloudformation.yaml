@@ -2,7 +2,60 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   LuminaUL - Plantilla de AWS CloudFormation para despliegue automatizado en AWS Academy.
   Orquesta la creacion de Security Group, Instancia EC2 (Ubuntu 24.04 LTS), memoria SWAP,
-  instalacion de Docker, integracion con DuckDNS y arranque automatico con Caddy TLS.
+  instalacion de Docker, generacion automatica del .env a partir de parametros, integracion
+  con DuckDNS y arranque automatico con Caddy TLS (Zero-Configuration / Cero 'nano').
+
+# ==============================================================================
+# METADATOS DE INTERFAZ (AGRUPACION VISUAL EN CONSOLA AWS)
+# ==============================================================================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "1. Red y Dominio Publico (DuckDNS)"
+        Parameters:
+          - DuckDnsSubdomain
+          - DuckDnsToken
+          - KeyName
+      - Label:
+          default: "2. Seguridad y Credenciales (.env)"
+        Parameters:
+          - DbPassword
+          - JwtSecret
+          - OpenAiApiKey
+          - MailTransport
+      - Label:
+          default: "3. Ramas de GitHub y Despliegue"
+        Parameters:
+          - FrontendBranch
+          - BackendBranch
+      - Label:
+          default: "4. Infraestructura EC2"
+        Parameters:
+          - InstanceType
+          - LatestUbuntuAmiId
+
+    ParameterLabels:
+      DuckDnsSubdomain:
+        default: "Subdominio DuckDNS"
+      DuckDnsToken:
+        default: "Token de DuckDNS"
+      KeyName:
+        default: "Nombre del Key Pair (.pem)"
+      DbPassword:
+        default: "Contraseña de PostgreSQL (DB_PASSWORD)"
+      JwtSecret:
+        default: "Secreto JWT de Sesion (JWT_SECRET)"
+      OpenAiApiKey:
+        default: "OpenAI API Key (Opcional - Moderacion IA)"
+      MailTransport:
+        default: "Transporte de Correo (MAIL_TRANSPORT)"
+      FrontendBranch:
+        default: "Rama de GitHub para Frontend (FRONTEND_BRANCH)"
+      BackendBranch:
+        default: "Rama de GitHub para Backend (BACKEND_BRANCH)"
+      InstanceType:
+        default: "Tipo de Instancia EC2"
 
 # ==============================================================================
 # PARAMETROS DE ENTRADA
@@ -22,6 +75,44 @@ Parameters:
     Description: 'Token alfanumerico de tu cuenta de DuckDNS (obtenido en https://www.duckdns.org)'
     Type: String
     NoEcho: true
+
+  DbPassword:
+    Description: 'Contraseña para el usuario postgres de la base de datos (DB_PASSWORD)'
+    Type: String
+    Default: 'LuminaSecurePass2026!'
+    NoEcho: true
+    MinLength: 8
+
+  JwtSecret:
+    Description: 'Clave secreta HS256 para firmar tokens JWT (minimo 32 caracteres)'
+    Type: String
+    Default: 'LuminaULSecretKeyAleatoriaMinimo32Caracteres2026!'
+    NoEcho: true
+    MinLength: 32
+
+  OpenAiApiKey:
+    Description: 'Clave de OpenAI para moderacion semantica opcional (dejar en blanco para desactivar)'
+    Type: String
+    Default: ''
+    NoEcho: true
+
+  MailTransport:
+    Description: 'Modo de emision de codigos OTP (console = logs de docker, smtp = correo real)'
+    Type: String
+    Default: 'console'
+    AllowedValues:
+      - 'console'
+      - 'smtp'
+
+  FrontendBranch:
+    Description: 'Rama del repositorio luminaul-frontend a compilar (ej: main o feature/mobile-PWA)'
+    Type: String
+    Default: 'main'
+
+  BackendBranch:
+    Description: 'Rama del repositorio luminaul-new-backend a compilar'
+    Type: String
+    Default: 'main'
 
   InstanceType:
     Description: 'Tipo de instancia EC2 compatible con AWS Academy'
@@ -54,7 +145,7 @@ Resources:
           ToPort: 22
           CidrIp: 0.0.0.0/0
           Description: 'Acceso SSH'
-        # Puerto 80: Trafico Web y desafio ACME Let's Encrypt de Caddy
+        # Puerto 80: Trafico Web y desafio ACME Let s Encrypt de Caddy
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
@@ -123,17 +214,42 @@ Resources:
           cd /home/ubuntu
           git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
           cd luminaul-docker
+
+          # 4. Generar archivo .env directamente desde los parametros de CloudFormation (CERO NANO)
+          echo "--> [4/7] Generando .env automatico desde CloudFormation..."
+          cat << 'ENVEOF' > .env
+          # Base de Datos PostgreSQL
+          DB_USER=postgres
+          DB_PASSWORD=${DbPassword}
+          DB_NAME=luminaul
+          DB_PORT=5432
+
+          # Seguridad y Sesion JWT
+          JWT_SECRET=${JwtSecret}
+          JWT_EXPIRES_IN=86400
+
+          # Dominio DuckDNS, CORS y WebSockets
+          DOMAIN=${DuckDnsSubdomain}.duckdns.org
+          DUCKDNS_SUBDOMAIN=${DuckDnsSubdomain}
+          DUCKDNS_TOKEN=${DuckDnsToken}
+          WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
+
+          # Servicio de Correo (OTP)
+          MAIL_TRANSPORT=${MailTransport}
+
+          # Moderacion Semantica con IA (Opcional)
+          OPENAI_API_KEY=${OpenAiApiKey}
+
+          # Ramas de GitHub a construir
+          BACKEND_BRANCH=${BackendBranch}
+          FRONTEND_BRANCH=${FrontendBranch}
+          ENVEOF
+
+          # Asegurar permisos del archivo .env y el repositorio
           chown -R ubuntu:ubuntu /home/ubuntu/luminaul-docker
+          chmod 600 .env
 
-          # 4. Configurar .env y Caddyfile con el subdominio DuckDNS
-          echo "--> [4/7] Configurando variables de entorno..."
-          cp .env.production.example .env
-          sed -i "s|^DOMAIN=.*|DOMAIN=${DuckDnsSubdomain}.duckdns.org|" .env
-          sed -i "s|^DUCKDNS_SUBDOMAIN=.*|DUCKDNS_SUBDOMAIN=${DuckDnsSubdomain}|" .env
-          sed -i "s|^DUCKDNS_TOKEN=.*|DUCKDNS_TOKEN=${DuckDnsToken}|" .env
-          sed -i "s|^WEB_ORIGIN=.*|WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost|" .env
-
-          # Actualizar el Caddyfile descargado del repositorio con el subdominio DuckDNS
+          # Actualizar el Caddyfile descargado con el subdominio DuckDNS
           if [ -f Caddyfile ]; then
             sed -i "s|{\$DOMAIN:localhost}|${DuckDnsSubdomain}.duckdns.org|g" Caddyfile
           fi
@@ -146,7 +262,7 @@ Resources:
 
           # 6. Crear Servicio Systemd para arranque e IP dinamica en cada encendido
           echo "--> [6/7] Creando servicio systemd persistente..."
-          cat << 'EOF' > /etc/systemd/system/luminaul.service
+          cat << 'SVCEOF' > /etc/systemd/system/luminaul.service
           [Unit]
           Description=LuminaUL Docker Compose Application
           Requires=docker.service
@@ -159,21 +275,24 @@ Resources:
           WorkingDirectory=/home/ubuntu/luminaul-docker
           User=ubuntu
           Group=docker
-          ExecStartPre=/bin/bash -c 'IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ]; then curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$IP"; sleep 5; fi'
+          ExecStartPre=/bin/bash -c 'set -a; [ -f /home/ubuntu/luminaul-docker/.env ] && . /home/ubuntu/luminaul-docker/.env; set +a; IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ] && [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then curl -s "https://www.duckdns.org/update?domains=$DUCKDNS_SUBDOMAIN&token=$DUCKDNS_TOKEN&ip=$IP"; sleep 5; fi'
           ExecStart=/usr/bin/docker compose up -d
           ExecStop=/usr/bin/docker compose down
           TimeoutStartSec=0
 
           [Install]
           WantedBy=multi-user.target
-          EOF
+          SVCEOF
 
           systemctl daemon-reload
           systemctl enable luminaul.service
           systemctl enable docker
 
-          # 7. Compilar y levantar contenedores
+          # 7. Compilar de forma secuencial (evita saturar CPU/RAM) y levantar servicios
           echo "--> [7/7] Compilando y levantando contenedores Docker..."
+          cd /home/ubuntu/luminaul-docker
+          docker compose build backend
+          docker compose build frontend
           systemctl start luminaul.service
 
           echo "=========================================================="
@@ -199,4 +318,3 @@ Outputs:
   SSHCommand:
     Description: 'Comando para conectarse por SSH al servidor desde tu terminal'
     Value: !Sub 'ssh -i "${KeyName}.pem" ubuntu@${LuminaulEC2Instance.PublicIp}'
-
