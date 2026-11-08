@@ -2,8 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   LuminaUL - Plantilla de AWS CloudFormation para despliegue automatizado en AWS Academy.
   Orquesta la creacion de Security Group, Instancia EC2 (Ubuntu 24.04 LTS), memoria SWAP,
-  instalacion de Docker, generacion automatica del .env a partir de parametros, integracion
-  con DuckDNS y arranque automatico con Caddy TLS (Zero-Configuration / Cero 'nano').
+  instalacion de Docker, integracion con DuckDNS, servicio de correo real via SMTP y
+  arranque automatico con Caddy TLS (Zero-Configuration / Cero 'nano').
 
 # ==============================================================================
 # METADATOS DE INTERFAZ (AGRUPACION VISUAL EN CONSOLA AWS)
@@ -18,20 +18,24 @@ Metadata:
           - DuckDnsToken
           - KeyName
       - Label:
-          default: "2. Seguridad y Credenciales (.env)"
+          default: "2. Correo Electronico Real (SMTP Obligatorio para codigos OTP)"
         Parameters:
-          - DbPassword
-          - JwtSecret
-          - OpenAiApiKey
-          - MailTransport
+          - SmtpUser
+          - SmtpPassword
+          - SmtpHost
+          - SmtpPort
+          - SmtpSecure
+          - MailFrom
       - Label:
           default: "3. Ramas de GitHub y Despliegue"
         Parameters:
           - FrontendBranch
           - BackendBranch
       - Label:
-          default: "4. Infraestructura EC2"
+          default: "4. Parametros Avanzados (Opcional - Ya vienen con valores por defecto)"
         Parameters:
+          - JwtSecret
+          - OpenAiApiKey
           - InstanceType
           - LatestUbuntuAmiId
 
@@ -42,18 +46,26 @@ Metadata:
         default: "Token de DuckDNS"
       KeyName:
         default: "Nombre del Key Pair (.pem)"
-      DbPassword:
-        default: "Contraseña de PostgreSQL (DB_PASSWORD)"
+      SmtpUser:
+        default: "Correo Remitente SMTP (ej: tu-cuenta@gmail.com)"
+      SmtpPassword:
+        default: "Contraseña de Aplicacion SMTP (16 caracteres)"
+      SmtpHost:
+        default: "Servidor SMTP"
+      SmtpPort:
+        default: "Puerto SMTP"
+      SmtpSecure:
+        default: "Conexion Segura SSL/TLS directa (SMTP_SECURE)"
+      MailFrom:
+        default: "Cabecera Remitente (MAIL_FROM)"
+      FrontendBranch:
+        default: "Rama de GitHub para Frontend"
+      BackendBranch:
+        default: "Rama de GitHub para Backend"
       JwtSecret:
-        default: "Secreto JWT de Sesion (JWT_SECRET)"
+        default: "Secreto JWT de Sesion"
       OpenAiApiKey:
         default: "OpenAI API Key (Opcional - Moderacion IA)"
-      MailTransport:
-        default: "Transporte de Correo (MAIL_TRANSPORT)"
-      FrontendBranch:
-        default: "Rama de GitHub para Frontend (FRONTEND_BRANCH)"
-      BackendBranch:
-        default: "Rama de GitHub para Backend (BACKEND_BRANCH)"
       InstanceType:
         default: "Tipo de Instancia EC2"
 
@@ -76,33 +88,38 @@ Parameters:
     Type: String
     NoEcho: true
 
-  DbPassword:
-    Description: 'Contraseña para el usuario postgres de la base de datos (DB_PASSWORD)'
+  # Parametros obligatorios de correo SMTP
+  SmtpUser:
+    Description: 'Correo electronico emisor para envio de codigos OTP a los alumnos (ej: soporte.luminaul@gmail.com)'
     Type: String
-    Default: 'LuminaSecurePass2026!'
-    NoEcho: true
-    MinLength: 8
 
-  JwtSecret:
-    Description: 'Clave secreta HS256 para firmar tokens JWT (minimo 32 caracteres)'
+  SmtpPassword:
+    Description: 'Contraseña de aplicacion generada en tu proveedor de correo (ej: 16 letras de Google App Passwords)'
     Type: String
-    Default: 'LuminaULSecretKeyAleatoriaMinimo32Caracteres2026!'
-    NoEcho: true
-    MinLength: 32
-
-  OpenAiApiKey:
-    Description: 'Clave de OpenAI para moderacion semantica opcional (dejar en blanco para desactivar)'
-    Type: String
-    Default: ''
     NoEcho: true
 
-  MailTransport:
-    Description: 'Modo de emision de codigos OTP (console = logs de docker, smtp = correo real)'
+  SmtpHost:
+    Description: 'Servidor SMTP saliente'
     Type: String
-    Default: 'console'
+    Default: 'smtp.gmail.com'
+
+  SmtpPort:
+    Description: 'Puerto del servidor SMTP (587 para STARTTLS | 465 para SSL directo)'
+    Type: Number
+    Default: 587
+
+  SmtpSecure:
+    Description: 'true para puerto 465 (SSL/TLS directo), false para puerto 587 (STARTTLS)'
+    Type: String
+    Default: 'false'
     AllowedValues:
-      - 'console'
-      - 'smtp'
+      - 'false'
+      - 'true'
+
+  MailFrom:
+    Description: 'Nombre y direccion que veran los estudiantes al recibir el correo de verificacion'
+    Type: String
+    Default: 'LuminaUL <soporte@luminaul.pe>'
 
   FrontendBranch:
     Description: 'Rama del repositorio luminaul-frontend a compilar (ej: main o feature/mobile-PWA)'
@@ -113,6 +130,19 @@ Parameters:
     Description: 'Rama del repositorio luminaul-new-backend a compilar'
     Type: String
     Default: 'main'
+
+  JwtSecret:
+    Description: 'Clave secreta HS256 para firmar tokens JWT (minimo 32 caracteres - usa valor por defecto si no deseas cambiarlo)'
+    Type: String
+    Default: 'LuminaULSecretKeyAleatoriaMinimo32Caracteres2026!'
+    NoEcho: true
+    MinLength: 32
+
+  OpenAiApiKey:
+    Description: 'Clave de OpenAI para moderacion semantica opcional (dejar en blanco para desactivar)'
+    Type: String
+    Default: ''
+    NoEcho: true
 
   InstanceType:
     Description: 'Tipo de instancia EC2 compatible con AWS Academy'
@@ -215,12 +245,12 @@ Resources:
           git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
           cd luminaul-docker
 
-          # 4. Generar archivo .env directamente desde los parametros de CloudFormation (CERO NANO)
+          # 4. Generar archivo .env automatico (DB_PASSWORD por defecto, SMTP configurado)
           echo "--> [4/7] Generando .env automatico desde CloudFormation..."
           cat << 'ENVEOF' > .env
-          # Base de Datos PostgreSQL
+          # Base de Datos PostgreSQL (Credenciales por defecto)
           DB_USER=postgres
-          DB_PASSWORD=${DbPassword}
+          DB_PASSWORD=LuminaSecurePass2026!
           DB_NAME=luminaul
           DB_PORT=5432
 
@@ -234,8 +264,14 @@ Resources:
           DUCKDNS_TOKEN=${DuckDnsToken}
           WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
 
-          # Servicio de Correo (OTP)
-          MAIL_TRANSPORT=${MailTransport}
+          # Servicio de Correo Real via SMTP
+          MAIL_TRANSPORT=smtp
+          SMTP_HOST=${SmtpHost}
+          SMTP_PORT=${SmtpPort}
+          SMTP_SECURE=${SmtpSecure}
+          SMTP_USER=${SmtpUser}
+          SMTP_PASSWORD=${SmtpPassword}
+          MAIL_FROM="${MailFrom}"
 
           # Moderacion Semantica con IA (Opcional)
           OPENAI_API_KEY=${OpenAiApiKey}
