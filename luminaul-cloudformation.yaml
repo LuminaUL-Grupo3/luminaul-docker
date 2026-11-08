@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  LuminaUL - Plantilla de AWS CloudFormation para despliegue automatizado en AWS Academy.
+  Orquesta la creacion de Security Group, Instancia EC2 (Ubuntu 24.04 LTS), memoria SWAP,
+  instalacion de Docker, integracion con DuckDNS y arranque automatico con Caddy TLS.
+
+# ==============================================================================
+# PARAMETROS DE ENTRADA
+# ==============================================================================
+Parameters:
+  KeyName:
+    Description: 'Nombre del Key Pair (.pem) previamente creado en tu consola de AWS EC2'
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: 'Debe ser el nombre exacto de un Key Pair existente.'
+
+  DuckDnsSubdomain:
+    Description: 'Subdominio registrado en DuckDNS (solo el nombre, sin .duckdns.org). Ejemplo: luminaul'
+    Type: String
+    Default: 'luminaul'
+
+  DuckDnsToken:
+    Description: 'Token alfanumerico de tu cuenta de DuckDNS (obtenido en https://www.duckdns.org)'
+    Type: String
+    NoEcho: true
+
+  InstanceType:
+    Description: 'Tipo de instancia EC2 compatible con AWS Academy'
+    Type: String
+    Default: 't3.small'
+    AllowedValues:
+      - 't3.small'
+      - 't3.micro'
+      - 't2.micro'
+
+  LatestUbuntuAmiId:
+    Description: 'Resolucion dinamica de la AMI oficial mas reciente de Ubuntu 24.04 LTS'
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id'
+
+# ==============================================================================
+# RECURSOS DE INFRAESTRUCTURA
+# ==============================================================================
+Resources:
+
+  # 1. Grupo de Seguridad (Firewall)
+  LuminaulSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Reglas de acceso para LuminaUL (SSH, HTTP, HTTPS)'
+      SecurityGroupIngress:
+        # Puerto 22: Acceso administrativo por SSH
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: 'Acceso SSH'
+        # Puerto 80: Trafico Web y desafio ACME Let's Encrypt de Caddy
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: 'HTTP y validacion ACME Let s Encrypt'
+        # Puerto 443: Trafico Seguro HTTPS con certificado oficial
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: 'HTTPS Seguro'
+      Tags:
+        - Key: Name
+          Value: luminaul-sg
+
+  # 2. Instancia EC2 con aprovisionamiento automatico (UserData)
+  LuminaulEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestUbuntuAmiId
+      SecurityGroupIds:
+        - !GetAtt LuminaulSecurityGroup.GroupId
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 25
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: luminaul-production-server
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+          echo "=========================================================="
+          echo "Iniciando despliegue automatizado de LuminaUL en AWS"
+          echo "=========================================================="
+
+          # 1. Crear memoria SWAP de 4GB para evitar Out-Of-Memory en el build
+          echo "--> [1/7] Configurando memoria SWAP..."
+          fallocate -l 4G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+          # 2. Instalar Docker Engine y Docker Compose Plugin
+          echo "--> [2/7] Instalando Docker CE y herramientas..."
+          apt-get update
+          apt-get install -y ca-certificates curl gnupg git
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+          apt-get update
+          apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          usermod -aG docker ubuntu
+
+          # 3. Clonar repositorio de despliegue
+          echo "--> [3/7] Clonando luminaul-docker..."
+          cd /home/ubuntu
+          git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
+          cd luminaul-docker
+          chown -R ubuntu:ubuntu /home/ubuntu/luminaul-docker
+
+          # 4. Configurar .env y Caddyfile con el subdominio DuckDNS
+          echo "--> [4/7] Configurando variables de entorno..."
+          cp .env.production.example .env
+          sed -i "s|^DOMAIN=.*|DOMAIN=${DuckDnsSubdomain}.duckdns.org|" .env
+          sed -i "s|^DUCKDNS_SUBDOMAIN=.*|DUCKDNS_SUBDOMAIN=${DuckDnsSubdomain}|" .env
+          sed -i "s|^DUCKDNS_TOKEN=.*|DUCKDNS_TOKEN=${DuckDnsToken}|" .env
+          sed -i "s|^WEB_ORIGIN=.*|WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost|" .env
+
+          cat << 'EOF_CADDY' > Caddyfile
+          ${DuckDnsSubdomain}.duckdns.org {
+          	encode gzip
+
+          	handle /api* {
+          		reverse_proxy backend:8000
+          	}
+
+          	handle /socket.io* {
+          		reverse_proxy backend:8000
+          	}
+
+          	handle {
+          		root * /srv
+          		try_files {path} /index.html
+          		file_server
+          	}
+          }
+          EOF_CADDY
+
+          # 5. Registrar IP inicial en DuckDNS
+          echo "--> [5/7] Reportando IP actual a DuckDNS..."
+          PUBLIC_IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+          curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$PUBLIC_IP"
+          sleep 5
+
+          # 6. Crear Servicio Systemd para arranque e IP dinamica en cada encendido
+          echo "--> [6/7] Creando servicio systemd persistente..."
+          cat << 'EOF' > /etc/systemd/system/luminaul.service
+          [Unit]
+          Description=LuminaUL Docker Compose Application
+          Requires=docker.service
+          After=docker.service network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          WorkingDirectory=/home/ubuntu/luminaul-docker
+          User=ubuntu
+          Group=docker
+          ExecStartPre=/bin/bash -c 'IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ]; then curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$IP"; sleep 5; fi'
+          ExecStart=/usr/bin/docker compose up -d
+          ExecStop=/usr/bin/docker compose down
+          TimeoutStartSec=0
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable luminaul.service
+          systemctl enable docker
+
+          # 7. Compilar y levantar contenedores
+          echo "--> [7/7] Compilando y levantando contenedores Docker..."
+          systemctl start luminaul.service
+
+          echo "=========================================================="
+          echo "Despliegue completado con exito. LuminaUL esta activo."
+          echo "=========================================================="
+
+# ==============================================================================
+# SALIDAS (OUTPUTS)
+# ==============================================================================
+Outputs:
+  InstanceId:
+    Description: 'ID de la Instancia EC2 creada'
+    Value: !Ref LuminaulEC2Instance
+
+  PublicIpAddress:
+    Description: 'Direccion IP publica inicial de la instancia'
+    Value: !GetAtt LuminaulEC2Instance.PublicIp
+
+  PublicApplicationUrl:
+    Description: 'URL publica oficial con HTTPS y certificado SSL valido'
+    Value: !Sub 'https://${DuckDnsSubdomain}.duckdns.org'
+
+  SSHCommand:
+    Description: 'Comando para conectarse por SSH al servidor desde tu terminal'
+    Value: !Sub 'ssh -i "${KeyName}.pem" ubuntu@${LuminaulEC2Instance.PublicIp}'
+

@@ -1,0 +1,28 @@
+# ==============================================================================
+# Caddyfile - Servidor Web y Reverse Proxy de LuminaUL (DuckDNS / TLS)
+# ==============================================================================
+# Puedes reemplazar '{$DOMAIN:localhost}' por tu subdominio real (ej: luminaul.duckdns.org)
+# o simplemente definir la variable DOMAIN=luminaul.duckdns.org en tu archivo .env.
+# ==============================================================================
+
+{$DOMAIN:localhost} {
+	encode gzip
+
+	# Endpoints de la API REST hacia NestJS (/api, /api/health, /api/docs, etc.)
+	handle /api* {
+		reverse_proxy backend:8000
+	}
+
+	# WebSockets del chat Socket.IO en tiempo real
+	handle /socket.io* {
+		reverse_proxy backend:8000
+	}
+
+	# Frontend Single Page Application (React / Vite)
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
+
