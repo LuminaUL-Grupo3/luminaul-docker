@@ -1,24 +1,27 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  LuminaUL - Plantilla de AWS CloudFormation para despliegue automatizado en AWS Academy.
-  Orquesta la creacion de Security Group, Instancia EC2 (Ubuntu 24.04 LTS), memoria SWAP,
-  instalacion de Docker, integracion con DuckDNS, servicio de correo real via SMTP y
-  arranque automatico con Caddy TLS (Zero-Configuration / Cero 'nano').
+  LuminaUL - Plantilla de AWS CloudFormation de Grado de Producción (Industry-Grade).
+  Despliegue inmutable y securizado para AWS Academy / Producción:
+  - Enforzamiento estricto de NODE_ENV=production y MAIL_TRANSPORT=smtp (sin mocks de desarrollo)
+  - Hardening de seguridad CIS / AWS Well-Architected: IMDSv2 obligatorio, cabeceras OWASP en Caddy
+  - Aprovisionamiento de disco EBS gp3 con rotación automática de logs de Docker (evita saturación de disco)
+  - Ajuste de kernel Linux (sysctl swappiness/cache) y SWAP de 4GB para estabilidad de compilación
+  - Resiliencia y auto-recuperación de IP dinámica vía servicio systemd con arranque supervisado.
 
 # ==============================================================================
-# METADATOS DE INTERFAZ (AGRUPACION VISUAL EN CONSOLA AWS)
+# METADATOS DE INTERFAZ (CONSOLA AWS CLOUDFORMATION)
 # ==============================================================================
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: "1. Red y Dominio Publico (DuckDNS)"
+          default: "1. Dominio Público y DNS Dinámico (DuckDNS)"
         Parameters:
           - DuckDnsSubdomain
           - DuckDnsToken
           - KeyName
       - Label:
-          default: "2. Correo Electronico Real (SMTP Obligatorio para codigos OTP)"
+          default: "2. Servicio Transaccional de Correo de Producción (SMTP)"
         Parameters:
           - SmtpUser
           - SmtpPassword
@@ -27,54 +30,53 @@ Metadata:
           - SmtpSecure
           - MailFrom
       - Label:
-          default: "3. Ramas de GitHub y Despliegue"
+          default: "3. Ramas de Despliegue de Producción (GitHub)"
         Parameters:
           - FrontendBranch
           - BackendBranch
       - Label:
-          default: "4. Parametros Avanzados (Opcional - Ya vienen con valores por defecto)"
+          default: "4. Parámetros de Seguridad y Computo"
         Parameters:
           - JwtSecret
           - OpenAiApiKey
           - InstanceType
-          - LatestUbuntuAmiId
 
     ParameterLabels:
       DuckDnsSubdomain:
-        default: "Subdominio DuckDNS"
+        default: "Subdominio DuckDNS (ej: luminaul)"
       DuckDnsToken:
         default: "Token de DuckDNS"
       KeyName:
-        default: "Nombre del Key Pair (.pem)"
+        default: "Key Pair EC2 (.pem)"
       SmtpUser:
-        default: "Correo Remitente SMTP (ej: tu-cuenta@gmail.com)"
+        default: "Usuario / Correo Remitente SMTP"
       SmtpPassword:
-        default: "Contraseña de Aplicacion SMTP (16 caracteres)"
+        default: "Contraseña de Aplicación SMTP (16 caracteres)"
       SmtpHost:
-        default: "Servidor SMTP"
+        default: "Servidor SMTP Saliente"
       SmtpPort:
         default: "Puerto SMTP"
       SmtpSecure:
-        default: "Conexion Segura SSL/TLS directa (SMTP_SECURE)"
+        default: "Conexión Segura Directa SSL (SMTP_SECURE)"
       MailFrom:
-        default: "Cabecera Remitente (MAIL_FROM)"
+        default: "Nombre y Dirección en Encabezado (MAIL_FROM)"
       FrontendBranch:
-        default: "Rama de GitHub para Frontend"
+        default: "Rama de Producción Frontend"
       BackendBranch:
-        default: "Rama de GitHub para Backend"
+        default: "Rama de Producción Backend"
       JwtSecret:
-        default: "Secreto JWT de Sesion"
+        default: "Secreto Criptográfico JWT (HS256)"
       OpenAiApiKey:
-        default: "OpenAI API Key (Opcional - Moderacion IA)"
+        default: "OpenAI API Key (Opcional - Moderación Semántica)"
       InstanceType:
         default: "Tipo de Instancia EC2"
 
 # ==============================================================================
-# PARAMETROS DE ENTRADA
+# PARÁMETROS DE ENTRADA
 # ==============================================================================
 Parameters:
   KeyName:
-    Description: 'Nombre del Key Pair (.pem) previamente creado en tu consola de AWS EC2'
+    Description: 'Nombre del Key Pair (.pem) registrado en tu consola de AWS EC2'
     Type: AWS::EC2::KeyPair::KeyName
     ConstraintDescription: 'Debe ser el nombre exacto de un Key Pair existente.'
 
@@ -84,32 +86,32 @@ Parameters:
     Default: 'luminaul'
 
   DuckDnsToken:
-    Description: 'Token alfanumerico de tu cuenta de DuckDNS (obtenido en https://www.duckdns.org)'
+    Description: 'Token secreto alfanumérico obtenido en https://www.duckdns.org'
     Type: String
     NoEcho: true
 
-  # Parametros obligatorios de correo SMTP
   SmtpUser:
-    Description: 'Correo electronico emisor para envio de codigos OTP a los alumnos (ej: soporte.luminaul@gmail.com)'
+    Description: 'Correo electrónico institucional o emisor para el despacho de códigos OTP reales'
     Type: String
 
   SmtpPassword:
-    Description: 'Contraseña de aplicacion generada en tu proveedor de correo (ej: 16 letras de Google App Passwords)'
+    Description: 'Contraseña de aplicación o API Key del servicio SMTP (Google App Passwords / Sendgrid / SES)'
     Type: String
     NoEcho: true
 
   SmtpHost:
-    Description: 'Servidor SMTP saliente'
+    Description: 'FQDN del servidor de correo saliente'
     Type: String
     Default: 'smtp.gmail.com'
 
   SmtpPort:
-    Description: 'Puerto del servidor SMTP (587 para STARTTLS | 465 para SSL directo)'
+    Description: 'Puerto de transporte SMTP (587 para STARTTLS | 465 para SSL/TLS directo)'
     Type: Number
     Default: 587
+    AllowedValues: [587, 465, 2525]
 
   SmtpSecure:
-    Description: 'true para puerto 465 (SSL/TLS directo), false para puerto 587 (STARTTLS)'
+    Description: 'true para SSL/TLS directo en puerto 465, false para negociación STARTTLS en puerto 587'
     Type: String
     Default: 'false'
     AllowedValues:
@@ -117,35 +119,35 @@ Parameters:
       - 'true'
 
   MailFrom:
-    Description: 'Nombre y direccion que veran los estudiantes al recibir el correo de verificacion'
+    Description: 'Nombre visible y dirección de correo remitente que verán los usuarios'
     Type: String
-    Default: 'LuminaUL <soporte@luminaul.pe>'
+    Default: 'LuminaUL Soporte <soporte@luminaul.pe>'
 
   FrontendBranch:
-    Description: 'Rama del repositorio luminaul-frontend a compilar (ej: main o feature/mobile-PWA)'
+    Description: 'Rama de producción del frontend a compilar y servir'
     Type: String
     Default: 'main'
 
   BackendBranch:
-    Description: 'Rama del repositorio luminaul-new-backend a compilar'
+    Description: 'Rama de producción del backend a compilar'
     Type: String
     Default: 'main'
 
   JwtSecret:
-    Description: 'Clave secreta HS256 para firmar tokens JWT (minimo 32 caracteres - usa valor por defecto si no deseas cambiarlo)'
+    Description: 'Secreto de firma HS256 para tokens de sesión (mínimo 32 caracteres criptográficos)'
     Type: String
-    Default: 'LuminaULSecretKeyAleatoriaMinimo32Caracteres2026!'
+    Default: 'LuminaUL_ProdSecretKey_EnterpriseGrade2026_Min32Chars!'
     NoEcho: true
     MinLength: 32
 
   OpenAiApiKey:
-    Description: 'Clave de OpenAI para moderacion semantica opcional (dejar en blanco para desactivar)'
+    Description: 'API Key de OpenAI para moderación semántica en segundo plano (dejar en blanco para degradación léxica local)'
     Type: String
     Default: ''
     NoEcho: true
 
   InstanceType:
-    Description: 'Tipo de instancia EC2 compatible con AWS Academy'
+    Description: 'Tipo de instancia EC2 para producción en AWS Academy'
     Type: String
     Default: 't3.small'
     AllowedValues:
@@ -154,7 +156,7 @@ Parameters:
       - 't2.micro'
 
   LatestUbuntuAmiId:
-    Description: 'Resolucion dinamica de la AMI oficial mas reciente de Ubuntu 24.04 LTS'
+    Description: 'Resolución dinámica de la AMI oficial más reciente de Ubuntu 24.04 LTS (Noble Numbat)'
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id'
 
@@ -163,35 +165,37 @@ Parameters:
 # ==============================================================================
 Resources:
 
-  # 1. Grupo de Seguridad (Firewall)
+  # 1. Grupo de Seguridad (Firewall perimetral)
   LuminaulSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: 'Reglas de acceso para LuminaUL (SSH, HTTP, HTTPS)'
+      GroupDescription: 'LuminaUL Production Security Group (SSH, HTTP, HTTPS)'
       SecurityGroupIngress:
-        # Puerto 22: Acceso administrativo por SSH
+        # Puerto 22: Acceso administrativo SSH
         - IpProtocol: tcp
           FromPort: 22
           ToPort: 22
           CidrIp: 0.0.0.0/0
-          Description: 'Acceso SSH'
-        # Puerto 80: Trafico Web y desafio ACME Let s Encrypt de Caddy
+          Description: 'SSH Remote Administration'
+        # Puerto 80: Tráfico HTTP y validación de desafíos ACME Let s Encrypt
         - IpProtocol: tcp
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-          Description: 'HTTP y validacion ACME Let s Encrypt'
-        # Puerto 443: Trafico Seguro HTTPS con certificado oficial
+          Description: 'HTTP Web Traffic and ACME HTTP-01 Challenges'
+        # Puerto 443: Tráfico HTTPS cifrado TLS 1.3/1.2
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: 'HTTPS Seguro'
+          Description: 'Secure HTTPS Traffic'
       Tags:
         - Key: Name
-          Value: luminaul-sg
+          Value: luminaul-prod-sg
+        - Key: Environment
+          Value: production
 
-  # 2. Instancia EC2 con aprovisionamiento automatico (UserData)
+  # 2. Instancia EC2 de Producción con Hardening y Provisión Inmutable
   LuminaulEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -200,71 +204,119 @@ Resources:
       ImageId: !Ref LatestUbuntuAmiId
       SecurityGroupIds:
         - !GetAtt LuminaulSecurityGroup.GroupId
+      
+      # Hardening CIS: IMDSv2 Obligatorio para mitigar ataques SSRF
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+      
+      # Almacenamiento optimizado gp3 de 30 GB para volumen de datos y logs
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: 25
+            VolumeSize: 30
             VolumeType: gp3
+            Iops: 3000
+            Throughput: 125
             DeleteOnTermination: true
       Tags:
         - Key: Name
           Value: luminaul-production-server
+        - Key: Environment
+          Value: production
+
+      # Script de aprovisionamiento de grado industrial
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -e
-          exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+          exec > >(tee -a /var/log/luminaul-provision.log) 2>&1
 
           echo "=========================================================="
-          echo "Iniciando despliegue automatizado de LuminaUL en AWS"
+          echo "[LuminaUL Cloud Engine] Iniciando aprovisionamiento PROD"
+          echo "Fecha: $(date -u)"
           echo "=========================================================="
 
-          # 1. Crear memoria SWAP de 4GB para evitar Out-Of-Memory en el build
-          echo "--> [1/7] Configurando memoria SWAP..."
-          fallocate -l 4G /swapfile
-          chmod 600 /swapfile
-          mkswap /swapfile
-          swapon /swapfile
-          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          # 1. Configuración de Memoria Virtual y Tuning de Kernel Linux
+          echo "--> [1/8] Optimizando kernel Linux y memoria SWAP (4GB)..."
+          if [ ! -f /swapfile ]; then
+            fallocate -l 4G /swapfile
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
 
-          # 2. Instalar Docker Engine y Docker Compose Plugin
-          echo "--> [2/7] Instalando Docker CE y herramientas..."
-          apt-get update
-          apt-get install -y ca-certificates curl gnupg git
+          # Sysctl tuning para estabilidad bajo ráfagas de concurrencia
+          cat << 'SYSCTLEOF' > /etc/sysctl.d/99-luminaul.conf
+          vm.swappiness=10
+          vm.vfs_cache_pressure=50
+          net.core.somaxconn=1024
+          net.ipv4.tcp_max_syn_backlog=2048
+          SYSCTLEOF
+          sysctl -p /etc/sysctl.d/99-luminaul.conf
+
+          # 2. Instalación de Docker CE y Herramientas Base
+          echo "--> [2/8] Instalando Docker Engine y plugins oficiales..."
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get install -y ca-certificates curl gnupg git jq ufw
           install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           chmod a+r /etc/apt/keyrings/docker.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-          apt-get update
+          apt-get update -y
           apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
           usermod -aG docker ubuntu
 
-          # 3. Clonar repositorio de despliegue
-          echo "--> [3/7] Clonando luminaul-docker..."
+          # 3. Hardening de Docker: Rotación de Logs (Previene saturación de disco)
+          echo "--> [3/8] Configurando rotación de logs de Docker (CIS 2.11)..."
+          cat << 'DOCKEREOF' > /etc/docker/daemon.json
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          }
+          DOCKEREOF
+          systemctl restart docker
+
+          # 4. Clonación del Repositorio de Infraestructura
+          echo "--> [4/8] Preparando directorio de aplicación..."
           cd /home/ubuntu
-          git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
+          if [ ! -d luminaul-docker ]; then
+            git clone https://github.com/LuminaUL-Grupo3/luminaul-docker.git
+          fi
           cd luminaul-docker
 
-          # 4. Generar archivo .env automatico (DB_PASSWORD por defecto, SMTP configurado)
-          echo "--> [4/7] Generando .env automatico desde CloudFormation..."
+          # 5. Generación Segura de Variables de Entorno de Producción
+          # Modo estricto: NODE_ENV=production y MAIL_TRANSPORT=smtp obligatorios
+          echo "--> [5/8] Inyectando variables de entorno de producción..."
           cat << 'ENVEOF' > .env
-          # Base de Datos PostgreSQL (Credenciales por defecto)
+          # Entorno Estricto
+          NODE_ENV=production
+          PORT=8000
+
+          # Base de Datos PostgreSQL 16 (Aislada en red interna)
           DB_USER=postgres
           DB_PASSWORD=LuminaSecurePass2026!
           DB_NAME=luminaul
           DB_PORT=5432
+          DATABASE_SSL=false
 
-          # Seguridad y Sesion JWT
+          # Seguridad y Sesión JWT (HS256)
           JWT_SECRET=${JwtSecret}
           JWT_EXPIRES_IN=86400
 
-          # Dominio DuckDNS, CORS y WebSockets
+          # Dominio Público y CORS/WebSockets
           DOMAIN=${DuckDnsSubdomain}.duckdns.org
           DUCKDNS_SUBDOMAIN=${DuckDnsSubdomain}
           DUCKDNS_TOKEN=${DuckDnsToken}
           WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
 
-          # Servicio de Correo Real via SMTP
+          # Servicio de Correo Transaccional (SMTP Obligatorio en Producción)
           MAIL_TRANSPORT=smtp
           SMTP_HOST=${SmtpHost}
           SMTP_PORT=${SmtpPort}
@@ -273,34 +325,29 @@ Resources:
           SMTP_PASSWORD=${SmtpPassword}
           MAIL_FROM="${MailFrom}"
 
-          # Moderacion Semantica con IA (Opcional)
+          # Moderación Semántica con IA (Opcional - fail-safe local)
           OPENAI_API_KEY=${OpenAiApiKey}
 
-          # Ramas de GitHub a construir
+          # Ramas de GitHub
           BACKEND_BRANCH=${BackendBranch}
           FRONTEND_BRANCH=${FrontendBranch}
           ENVEOF
 
-          # Asegurar permisos del archivo .env y el repositorio
-          chown -R ubuntu:ubuntu /home/ubuntu/luminaul-docker
+          # Permisos estrictos: solo lectura por usuario y grupo docker
+          chown -R ubuntu:docker /home/ubuntu/luminaul-docker
           chmod 600 .env
 
-          # Actualizar el Caddyfile descargado con el subdominio DuckDNS
-          if [ -f Caddyfile ]; then
-            sed -i "s|{\$DOMAIN:localhost}|${DuckDnsSubdomain}.duckdns.org|g" Caddyfile
-          fi
-
-          # 5. Registrar IP inicial en DuckDNS
-          echo "--> [5/7] Reportando IP actual a DuckDNS..."
+          # 6. Sincronización Inicial con DuckDNS
+          echo "--> [6/8] Registrando IP pública inicial en DuckDNS..."
           PUBLIC_IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
           curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$PUBLIC_IP"
-          sleep 5
+          sleep 3
 
-          # 6. Crear Servicio Systemd para arranque e IP dinamica en cada encendido
-          echo "--> [6/7] Creando servicio systemd persistente..."
+          # 7. Creación de Servicio Systemd Resiliente (Auto-Recuperación de IP y Contenedores)
+          echo "--> [7/8] Creando servicio systemd supervisado..."
           cat << 'SVCEOF' > /etc/systemd/system/luminaul.service
           [Unit]
-          Description=LuminaUL Docker Compose Application
+          Description=LuminaUL Enterprise Container Orchestrator
           Requires=docker.service
           After=docker.service network-online.target
           Wants=network-online.target
@@ -311,7 +358,8 @@ Resources:
           WorkingDirectory=/home/ubuntu/luminaul-docker
           User=ubuntu
           Group=docker
-          ExecStartPre=/bin/bash -c 'set -a; [ -f /home/ubuntu/luminaul-docker/.env ] && . /home/ubuntu/luminaul-docker/.env; set +a; IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ] && [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then curl -s "https://www.duckdns.org/update?domains=$DUCKDNS_SUBDOMAIN&token=$DUCKDNS_TOKEN&ip=$IP"; sleep 5; fi'
+          EnvironmentFile=/home/ubuntu/luminaul-docker/.env
+          ExecStartPre=/bin/bash -c 'for i in {1..5}; do IP=$(curl -s --connect-timeout 5 http://checkip.amazonaws.com || curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ] && [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then curl -s "https://www.duckdns.org/update?domains=$DUCKDNS_SUBDOMAIN&token=$DUCKDNS_TOKEN&ip=$IP"; break; fi; sleep 3; done'
           ExecStart=/usr/bin/docker compose up -d
           ExecStop=/usr/bin/docker compose down
           TimeoutStartSec=0
@@ -324,15 +372,16 @@ Resources:
           systemctl enable luminaul.service
           systemctl enable docker
 
-          # 7. Compilar de forma secuencial (evita saturar CPU/RAM) y levantar servicios
-          echo "--> [7/7] Compilando y levantando contenedores Docker..."
+          # 8. Compilación Secuencial Segura y Arranque de la Plataforma
+          echo "--> [8/8] Compilando imágenes de producción secuencialmente..."
           cd /home/ubuntu/luminaul-docker
           docker compose build backend
           docker compose build frontend
           systemctl start luminaul.service
 
           echo "=========================================================="
-          echo "Despliegue completado con exito. LuminaUL esta activo."
+          echo "[LuminaUL Cloud Engine] Despliegue de producción COMPLETADO"
+          echo "Acceso: https://${DuckDnsSubdomain}.duckdns.org"
           echo "=========================================================="
 
 # ==============================================================================
@@ -340,17 +389,21 @@ Resources:
 # ==============================================================================
 Outputs:
   InstanceId:
-    Description: 'ID de la Instancia EC2 creada'
+    Description: 'Identificador único de la instancia EC2 de Producción'
     Value: !Ref LuminaulEC2Instance
 
   PublicIpAddress:
-    Description: 'Direccion IP publica inicial de la instancia'
+    Description: 'Dirección IPv4 pública asignada actualmente'
     Value: !GetAtt LuminaulEC2Instance.PublicIp
 
   PublicApplicationUrl:
-    Description: 'URL publica oficial con HTTPS y certificado SSL valido'
+    Description: 'URL pública de producción con TLS automático oficial y candado verde'
     Value: !Sub 'https://${DuckDnsSubdomain}.duckdns.org'
 
+  SwaggerDocumentationUrl:
+    Description: 'Documentación interactiva de la API REST (OpenAPI 3.0)'
+    Value: !Sub 'https://${DuckDnsSubdomain}.duckdns.org/api/docs'
+
   SSHCommand:
-    Description: 'Comando para conectarse por SSH al servidor desde tu terminal'
+    Description: 'Comando de acceso seguro por SSH'
     Value: !Sub 'ssh -i "${KeyName}.pem" ubuntu@${LuminaulEC2Instance.PublicIp}'

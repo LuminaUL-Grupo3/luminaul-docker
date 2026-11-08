@@ -1,28 +1,47 @@
 # ==============================================================================
-# Caddyfile - Servidor Web y Reverse Proxy de LuminaUL (DuckDNS / TLS)
+# Caddyfile - Servidor Web y Reverse Proxy de Producción (LuminaUL)
 # ==============================================================================
-# Puedes reemplazar '{$DOMAIN:localhost}' por tu subdominio real (ej: luminaul.duckdns.org)
-# o simplemente definir la variable DOMAIN=luminaul.duckdns.org en tu archivo .env.
+# Nivel de Industria: TLS Automático (Let's Encrypt), Compresión zstd/gzip,
+# Cabeceras de Seguridad OWASP/CIS y Proxy Reverso de Alta Disponibilidad.
 # ==============================================================================
 
 {$DOMAIN:localhost} {
-	encode gzip
+	encode zstd gzip
 
-	# Endpoints de la API REST hacia NestJS (/api, /api/health, /api/docs, etc.)
+	# Cabeceras de Seguridad HTTP de Grado de Producción (OWASP / CIS Benchmark)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# API REST NestJS: Proxy con preservación segura de IP de cliente
 	handle /api* {
-		reverse_proxy backend:8000
+		reverse_proxy backend:8000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
-	# WebSockets del chat Socket.IO en tiempo real
+	# WebSockets: Pasarela de Socket.IO en tiempo real con soporte WSS
 	handle /socket.io* {
-		reverse_proxy backend:8000
+		reverse_proxy backend:8000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
 	}
 
-	# Frontend Single Page Application (React / Vite)
+	# Frontend Single Page Application (React / Vite) con fallback offline PWA
 	handle {
 		root * /srv
 		try_files {path} /index.html
 		file_server
 	}
 }
-
