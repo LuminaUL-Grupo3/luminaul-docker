@@ -5,31 +5,31 @@ Repositorio oficial de infraestructura, contenedores y despliegue continuo de gr
 Orquesta la arquitectura de producción mediante **Docker Compose**, **Caddy 2** (Reverse Proxy + TLS automático con Let's Encrypt), **PostgreSQL 16** y **NestJS 12**.
 
 * **Backend:** [LuminaUL-Grupo3/luminaul-new-backend](https://github.com/LuminaUL-Grupo3/luminaul-new-backend)
-* **Frontend (PWA):** [LuminaUL-Grupo3/luminaul-frontend](https://github.com/LuminaUL-Grupo3/luminaul-frontend)
+* **Frontend:** [LuminaUL-Grupo3/luminaul-frontend](https://github.com/LuminaUL-Grupo3/luminaul-frontend)
 
 ---
 
-## 1. Arquitectura de Producción
+## 1. Requisitos Previos y Arquitectura
 
-* **Modo Estricto de Producción:** `NODE_ENV=production` enforzado en todas las capas.
-* **Correo Transaccional Real:** `MAIL_TRANSPORT=smtp` obligatorio para el despacho de códigos OTP de autenticación institucional.
+* **Docker Engine:** Versión 24 o superior.
+* **Docker Compose Plugin:** Versión 2.20 o superior.
+* **Memoria SWAP:** En instancias con 1 GB o 2 GB de RAM (`t3.small` / `t2.micro`), es **obligatorio configurar 4 GB de SWAP** antes de compilar para evitar congelamientos por Out-of-Memory.
 * **Seguridad de Red (OWASP / CIS):**
   - **IMDSv2 Obligatorio:** Mitigación de ataques SSRF contra metadatos de AWS.
-  - **Rotación de Logs:** Docker daemon configurado con límite de 30 MB (`json-file`) para prevenir la saturación del disco EBS.
-  - **Reverse Proxy Caddy:** HSTS (1 año + preload), `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, y cabeceras `X-Forwarded-For` para soporte nativo de `trust proxy` en NestJS.
+  - **Rotación de Logs:** Docker daemon configurado con límite de 30 MB (`json-file`) para prevenir saturación del disco EBS.
+  - **Reverse Proxy Caddy:** HSTS, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, y cabeceras `X-Forwarded-For` para soporte de `trust proxy` en NestJS.
   - **Base de Datos Aislada:** PostgreSQL (`DATABASE_SSL=false`) opera estrictamente en la red interna privada de Docker (`luminaul-net`), sin exposición a internet.
-* **Frontend PWA Móvil:** Progressive Web App instalable con soporte offline y banner interactivo exclusivo para celulares y tablets (Android e iOS).
 
 ---
 
-## 2. Despliegue en AWS Academy (Elige tu Opción)
+## 2. Instrucciones de Despliegue
 
 ### Opción A: Despliegue Automatizado con CloudFormation (Recomendado - Cero `nano`)
 
-Utiliza la plantilla de grado de industria [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.yaml). CloudFormation creará toda la infraestructura y te solicitará los parámetros en un formulario web visual:
+Utiliza la plantilla [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.yaml). CloudFormation aprovisiona toda la infraestructura y solicita las credenciales mediante un formulario web en la consola de AWS:
 
 1. En la consola de AWS, dirígete a **CloudFormation** $\rightarrow$ **Create stack** (with new resources) $\rightarrow$ **Upload a template file** y sube `luminaul-cloudformation.yaml`.
-2. Completa los campos en el asistente visual de AWS:
+2. Completa los parámetros en el formulario:
    * **1. Red y Dominio Público:**
      * `DuckDnsSubdomain`: Tu subdominio en DuckDNS (ej: `luminaul`).
      * `DuckDnsToken`: Tu token secreto de DuckDNS *(campo oculto)*.
@@ -42,21 +42,18 @@ Utiliza la plantilla de grado de industria [`luminaul-cloudformation.yaml`](./lu
      * `SmtpSecure`: `false` (por defecto para puerto 587 con STARTTLS).
      * `MailFrom`: `LuminaUL Soporte <soporte@luminaul.pe>`.
    * **3. Ramas de GitHub:**
-     * `FrontendBranch`: `main` (o rama específica como `feature/mobile-PWA`).
-     * `BackendBranch`: `main`.
+     * `FrontendBranch`: Rama de producción del frontend (ej: `main`).
+     * `BackendBranch`: Rama de producción del backend (ej: `main`).
 3. Haz clic en **Create stack**.
-4. **Listo.** En ~4 minutos, CloudFormation:
-   * Crea el Security Group y la instancia EC2 con 30 GB gp3 y 4 GB de SWAP.
-   * Genera el archivo `.env` automáticamente con permisos seguros (`chmod 600`).
-   * Registra la IP en DuckDNS, compila los contenedores e inicializa LuminaUL en HTTPS con certificado TLS oficial.
+4. En ~4 minutos la pila finalizará y LuminaUL estará activo con certificado TLS oficial en `https://<tu-subdominio>.duckdns.org`.
 
 ---
 
 ### Opción B: Despliegue Manual por SSH
 
-Si prefieres aprovisionar manualmente dentro de una instancia Ubuntu 24.04 LTS:
+Si aprovisionas directamente dentro de una instancia Ubuntu 24.04 LTS:
 
-#### 2.1 Preparar Memoria SWAP de 4GB
+#### 2.1 Configurar Memoria SWAP de 4GB
 ```bash
 sudo fallocate -l 4G /swapfile
 sudo chmod 600 /swapfile
@@ -81,7 +78,7 @@ Configura tus credenciales reales en `.env`:
 
 #### 2.3 Compilación Secuencial Segura
 > [!IMPORTANT]
-> En servidores pequeños (`t3.small` / `t2.micro`), **compila siempre los servicios uno por uno**. Compilar en paralelo satura el procesador y puede congelar la sesión SSH.
+> En servidores pequeños (`t3.small` / `t2.micro`), **compila siempre los servicios uno por uno** de forma secuencial para evitar saturar el procesador.
 
 ```bash
 # 1. Compilar backend NestJS
@@ -100,31 +97,18 @@ docker compose up -d
 
 | Servicio | URL / Puerto | Descripción |
 | :--- | :--- | :--- |
-| **Frontend PWA (HTTPS)** | `https://<subdominio>.duckdns.org` (:443) | Aplicación React 19 servida por Caddy con **TLS oficial Let's Encrypt (candado verde)** |
-| **Frontend (HTTP)** | `http://<subdominio>.duckdns.org` (:80) | Redirección 301 automática a HTTPS y validación ACME |
-| **API REST Backend** | `/api/*` (enrutado a NestJS :8000) | Endpoints de negocio (Auth, Perfil, Posts, Reseñas, Moderación, Admin) |
+| **Frontend Web (HTTPS)** | `https://<subdominio>.duckdns.org` (:443) | Aplicación React 19 servida por Caddy con **TLS oficial Let's Encrypt (candado verde)** |
+| **Frontend Web (HTTP)** | `http://<subdominio>.duckdns.org` (:80) | Redirección 301 automática a HTTPS y validación ACME |
+| **API REST Backend** | `/api/*` (enrutado a NestJS :8000) | Endpoints de negocio (Auth, Perfiles, Publicaciones, Reseñas, Moderación, Admin) |
 | **WebSockets Chat** | `/socket.io/*` (WSS en tiempo real) | Pasarela de chat grupal con control anti-spam (SPEC-04) |
 | **Swagger UI** | `https://<subdominio>.duckdns.org/api/docs` | Documentación interactiva de la API |
 | **PostgreSQL 16** | Puerto interno `5432` | Base de datos relacional aislada en la red privada de Docker |
 
 ---
 
-## 4. Instalación como PWA en Dispositivos Móviles
+## 4. ¿Cómo actualizar cuando hay cambios nuevos en GitHub?
 
-LuminaUL incluye soporte PWA completo con un banner interactivo que **se activa exclusivamente en smartphones y tablets táctiles**:
-
-* **En Android (Google Chrome):**  
-  Aparece el banner inferior *"Instala LuminaUL - Acceso rápido sin abrir navegador"*. Al presionar el botón **"Instalar"**, el navegador abre el diálogo nativo de instalación en el dispositivo.
-* **En iPhone / iPad (Safari iOS):**  
-  Muestra las instrucciones guiadas: *"Toca Compartir [↑] y luego 'Añadir a inicio' ➕"*.
-* **En PC / Laptops con mouse:**  
-  El banner se apaga automáticamente para no ser invasivo.
-
----
-
-## 5. ¿Cómo actualizar cuando hay cambios nuevos en GitHub?
-
-Cuando subas nuevos commits a las ramas de producción:
+Cuando se suban nuevos commits a las ramas de producción:
 
 ```bash
 cd /home/ubuntu/luminaul-docker
@@ -132,8 +116,8 @@ cd /home/ubuntu/luminaul-docker
 # 1. Reconstruir el backend sin caché
 docker compose build --no-cache backend
 
-# 2. Reconstruir el frontend sin caché (especificando rama si usas una distinta a main)
-FRONTEND_BRANCH=feature/mobile-PWA docker compose build --no-cache frontend
+# 2. Reconstruir el frontend sin caché
+docker compose build --no-cache frontend
 
 # 3. Reiniciar contenedores
 docker compose up -d backend frontend
@@ -141,7 +125,7 @@ docker compose up -d backend frontend
 
 ---
 
-## 6. Procedimiento para Apagar y Reanudar el Laboratorio (AWS Academy)
+## 5. Procedimiento para Apagar y Reanudar el Laboratorio (AWS Academy)
 
 ### Para Apagar (Evitar consumo de créditos):
 > [!CAUTION]
@@ -157,7 +141,7 @@ docker compose up -d backend frontend
 
 ---
 
-## 7. Comandos de Diagnóstico y Operación
+## 6. Comandos de Diagnóstico y Operación
 
 ```bash
 # Ver estado y healthchecks de los contenedores
