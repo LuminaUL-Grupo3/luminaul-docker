@@ -30,8 +30,10 @@ services:
       PORT: 8000
       NODE_ENV: production
       DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-luminaul}
+      DATABASE_SSL: "false"
       JWT_SECRET: ${JWT_SECRET:-super-secret-key-luminaul-development-2026}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-86400}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost,http://127.0.0.1,http://localhost:5173,http://127.0.0.1:5173,https://localhost,https://127.0.0.1}
     ports:
       - "8000:8000"
     depends_on:
@@ -39,11 +41,6 @@ services:
         condition: service_healthy
     networks:
       - luminaul-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   frontend:
     build: https://github.com/LuminaUL-Grupo3/luminaul-frontend.git#${FRONTEND_BRANCH:-main}
@@ -53,6 +50,10 @@ services:
     ports:
       - "80:80"
       - "5173:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -62,9 +63,12 @@ services:
 volumes:
   postgres_data:
     name: luminaul-postgres-data
+  caddy_data:
+    name: luminaul-caddy-data
+  caddy_config:
+    name: luminaul-caddy-config
 
 networks:
   luminaul-net:
     name: luminaul-network
     driver: bridge
-

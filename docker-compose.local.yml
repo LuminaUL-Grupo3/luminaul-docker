@@ -1,0 +1,8 @@
+services:
+  backend:
+    build:
+      context: ../luminaul-new-backend
+  frontend:
+    build:
+      context: ../luminaul-frontend
+
