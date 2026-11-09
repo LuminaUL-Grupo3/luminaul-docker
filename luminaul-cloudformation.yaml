@@ -335,15 +335,21 @@ Resources:
           chown -R ubuntu:docker /home/ubuntu/luminaul-docker
           chmod 600 .env
 
-          # 6. Sincronización Inicial con DuckDNS
+          # 6. Sincronización Inicial con DuckDNS (Compatible con IMDSv2 y Tolerante a Fallos)
           echo "--> [6/8] Registrando IP pública inicial en DuckDNS..."
-          PUBLIC_IP=$(curl -s http://checkip.amazonaws.com || curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-          curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$PUBLIC_IP"
-          sleep 3
+          PUBLIC_IP=$(curl -s --connect-timeout 5 http://checkip.amazonaws.com || true)
+          if [ -z "$PUBLIC_IP" ]; then
+            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+            PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)
+          fi
+          if [ -n "$PUBLIC_IP" ] && [ -n "${DuckDnsSubdomain}" ] && [ -n "${DuckDnsToken}" ]; then
+            curl -s "https://www.duckdns.org/update?domains=${DuckDnsSubdomain}&token=${DuckDnsToken}&ip=$PUBLIC_IP" || true
+          fi
+          sleep 2
 
-          # 7. Creación de Servicio Systemd Resiliente (Auto-Recuperación de IP y Contenedores)
+          # 7. Creación de Servicio Systemd Resiliente (Con permisos sudo universales)
           echo "--> [7/8] Creando servicio systemd supervisado..."
-          cat << 'SVCEOF' > /etc/systemd/system/luminaul.service
+          sudo tee /etc/systemd/system/luminaul.service > /dev/null << 'SVCEOF'
           [Unit]
           Description=LuminaUL Enterprise Container Orchestrator
           Requires=docker.service
@@ -354,10 +360,9 @@ Resources:
           Type=oneshot
           RemainAfterExit=yes
           WorkingDirectory=/home/ubuntu/luminaul-docker
-          User=ubuntu
-          Group=docker
+          User=root
           EnvironmentFile=/home/ubuntu/luminaul-docker/.env
-          ExecStartPre=/bin/bash -c 'for i in {1..5}; do IP=$(curl -s --connect-timeout 5 http://checkip.amazonaws.com || curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/public-ipv4); if [ -n "$IP" ] && [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then curl -s "https://www.duckdns.org/update?domains=$DUCKDNS_SUBDOMAIN&token=$DUCKDNS_TOKEN&ip=$IP"; break; fi; sleep 3; done'
+          ExecStartPre=/bin/bash -c 'for i in {1..5}; do IP=$(curl -s --connect-timeout 5 http://checkip.amazonaws.com || true); if [ -n "$IP" ] && [ -n "$DUCKDNS_SUBDOMAIN" ] && [ -n "$DUCKDNS_TOKEN" ]; then curl -s "https://www.duckdns.org/update?domains=$DUCKDNS_SUBDOMAIN&token=$DUCKDNS_TOKEN&ip=$IP"; break; fi; sleep 3; done'
           ExecStart=/usr/bin/docker compose up -d
           ExecStop=/usr/bin/docker compose down
           TimeoutStartSec=0
@@ -366,16 +371,15 @@ Resources:
           WantedBy=multi-user.target
           SVCEOF
 
-          systemctl daemon-reload
-          systemctl enable luminaul.service
-          systemctl enable docker
+          sudo systemctl daemon-reload
+          sudo systemctl enable luminaul.service
+          sudo systemctl enable docker
 
           # 8. Compilación Secuencial Segura y Arranque de la Plataforma
           echo "--> [8/8] Compilando imágenes de producción secuencialmente..."
           cd /home/ubuntu/luminaul-docker
-          docker compose build backend
-          docker compose build frontend
-          systemctl start luminaul.service
+          sudo docker compose build
+          sudo systemctl start luminaul.service
 
           echo "=========================================================="
           echo "[LuminaUL Cloud Engine] Despliegue de producción COMPLETADO"
