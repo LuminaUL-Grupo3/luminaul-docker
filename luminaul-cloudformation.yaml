@@ -211,14 +211,12 @@ Resources:
         HttpEndpoint: enabled
         HttpPutResponseHopLimit: 1
       
-      # Almacenamiento optimizado gp3 de 30 GB para volumen de datos y logs
+      # Almacenamiento optimizado gp3 de 30 GB (3000 IOPS y 125 MB/s incluidos por defecto en gp3)
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: 30
             VolumeType: gp3
-            Iops: 3000
-            Throughput: 125
             DeleteOnTermination: true
       Tags:
         - Key: Name
