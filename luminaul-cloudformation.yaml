@@ -90,13 +90,23 @@ Parameters:
     Type: String
     NoEcho: true
 
-  SmtpUser:
-    Description: 'Correo electrónico institucional o emisor para el despacho de códigos OTP reales'
+  MailTransport:
+    Description: 'Modo de despacho de correos OTP: "console" (imprime los códigos en los logs de docker, ideal para pruebas) o "smtp" (despacho de correos reales).'
     Type: String
+    Default: 'console'
+    AllowedValues:
+      - 'console'
+      - 'smtp'
+
+  SmtpUser:
+    Description: 'Correo electrónico institucional o emisor para el despacho de códigos OTP reales (requerido si MailTransport=smtp)'
+    Type: String
+    Default: ''
 
   SmtpPassword:
-    Description: 'Contraseña de aplicación o API Key del servicio SMTP (Google App Passwords / Sendgrid / SES)'
+    Description: 'Contraseña de aplicación o API Key del servicio SMTP (requerido si MailTransport=smtp)'
     Type: String
+    Default: ''
     NoEcho: true
 
   SmtpHost:
@@ -314,8 +324,8 @@ Resources:
           DUCKDNS_TOKEN=${DuckDnsToken}
           WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
 
-          # Servicio de Correo Transaccional (SMTP Obligatorio en Producción)
-          MAIL_TRANSPORT=smtp
+          # Servicio de Correo Transaccional (console o smtp)
+          MAIL_TRANSPORT=${MailTransport}
           SMTP_HOST=${SmtpHost}
           SMTP_PORT=${SmtpPort}
           SMTP_SECURE=${SmtpSecure}
