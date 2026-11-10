@@ -2,7 +2,11 @@ services:
   backend:
     build:
       context: ../luminaul-new-backend
+      args:
+        NODE_VERSION: ${NODE_VERSION:-24-alpine}
   frontend:
     build:
       context: ../luminaul-frontend
+      args:
+        NODE_VERSION: ${NODE_VERSION:-24-alpine}
 

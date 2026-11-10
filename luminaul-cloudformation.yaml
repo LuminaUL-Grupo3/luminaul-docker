@@ -305,6 +305,7 @@ Resources:
           cat << 'ENVEOF' > .env
           # Entorno Estricto
           NODE_ENV=production
+          NODE_VERSION=24-alpine
           PORT=8000
 
           # Base de Datos PostgreSQL 16 (Aislada en red interna)
