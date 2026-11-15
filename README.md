@@ -13,7 +13,7 @@ Orquesta la arquitectura de producción mediante **Docker Compose**, **Caddy 2**
 
 * **Docker Engine:** Versión 24 o superior.
 * **Docker Compose Plugin:** Versión 2.20 o superior.
-* **Memoria SWAP:** En instancias con 1 GB o 2 GB de RAM (`t3.small` / `t2.micro`), es **obligatorio configurar 4 GB de SWAP** antes de compilar para evitar congelamientos por Out-of-Memory.
+* **Instancia EC2 y Memoria SWAP:** CloudFormation aprovisiona por defecto una instancia **`t3.medium`** (4 GB RAM; soporta también `t3.small`) y configura **2 GB de SWAP** + rotación automática de logs y parámetros `sysctl`. Si despliegas manualmente en una instancia pequeña (`t3.small`), configura al menos 2–4 GB de SWAP antes de compilar.
 
 ---
 
@@ -29,7 +29,8 @@ Utiliza la plantilla [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.
      * `DuckDnsSubdomain`: Tu subdominio en DuckDNS (ej: `luminaul`).
      * `DuckDnsToken`: Tu token secreto de DuckDNS *(campo oculto)*.
      * `KeyName`: Tu par de claves EC2 (`.pem`).
-   * **2. Correo Transaccional Real (SMTP):**
+   * **2. Correo Transaccional (OTP):**
+     * `MailTransport`: `console` (imprime OTPs en logs, ideal para pruebas) o `smtp` (envío real).
      * `SmtpUser`: Tu correo emisor (ej: `tu-cuenta@gmail.com`).
      * `SmtpPassword`: Contraseña de aplicación de 16 caracteres de Google *(campo oculto)*.
      * `SmtpHost`: `smtp.gmail.com` (por defecto).
@@ -39,8 +40,13 @@ Utiliza la plantilla [`luminaul-cloudformation.yaml`](./luminaul-cloudformation.
    * **3. Ramas de GitHub:**
      * `FrontendBranch`: Rama de producción del frontend (ej: `main`).
      * `BackendBranch`: Rama de producción del backend (ej: `main`).
+   * **4. Seguridad y Cómputo:**
+     * `OpenAiApiKey`: Opcional para moderación semántica en segundo plano *(campo oculto)*.
+     * `InstanceType`: `t3.medium` por defecto (permite `t3.small`).
+     * *Nota:* El `JWT_SECRET` de producción se genera aleatoriamente por instancia en `UserData` con `openssl rand -base64 48`, y la pila usa `WaitCondition` (`420s`) para confirmar que los contenedores y `/health` arrancaron correctamente antes de marcar `CREATE_COMPLETE`.
+     * *CORS:* El backend construye automáticamente la lista blanca usando `DOMAIN`, `WEB_ORIGIN` y `FRONTEND_URL`.
 3. Haz clic en **Create stack**.
-4. En ~4 minutos la pila finalizará y LuminaUL estará activo con certificado TLS oficial en `https://<tu-subdominio>.duckdns.org`.
+4. Una vez completada la espera de validación, LuminaUL estará activo con certificado TLS oficial en `https://<tu-subdominio>.duckdns.org`.
 
 ---
 
@@ -73,7 +79,7 @@ Configura tus credenciales reales en `.env`:
 
 #### 2.3 Compilación Secuencial Segura
 > [!IMPORTANT]
-> En servidores pequeños (`t3.small` / `t2.micro`), **compila siempre los servicios uno por uno** de forma secuencial para evitar saturar el procesador.
+> En servidores con poca RAM (`t3.small`), **compila siempre los servicios uno por uno** de forma secuencial para evitar saturar la memoria.
 
 ```bash
 # 1. Compilar backend NestJS
