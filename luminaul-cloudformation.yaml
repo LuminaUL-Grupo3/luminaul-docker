@@ -404,10 +404,10 @@ Resources:
           sudo systemctl enable luminaul.service
           sudo systemctl enable docker
 
-          # 8. Compilación Secuencial Segura y Arranque de la Plataforma
-          echo "--> [8/8] Compilando imágenes de producción secuencialmente..."
+          # 8. Descarga de imágenes pre-buildeadas y Arranque de la Plataforma
+          echo "--> [8/8] Descargando imágenes pre-buildeadas desde GHCR..."
           cd /home/ubuntu/luminaul-docker
-          sudo docker compose build
+          sudo docker compose pull
           sudo systemctl start luminaul.service
 
           echo "--> Verificando salud real de backend y frontend en Docker..."

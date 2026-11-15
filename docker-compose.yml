@@ -22,11 +22,7 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: https://github.com/LuminaUL-Grupo3/luminaul-new-backend.git#${BACKEND_BRANCH:-main}
-      args:
-        NODE_VERSION: ${NODE_VERSION:-24-alpine}
-    image: luminaul-backend:production
+    image: ${BACKEND_IMAGE:-ghcr.io/luminaul-grupo3/luminaul-new-backend:latest}
     container_name: luminaul-backend
     restart: unless-stopped
     environment:
@@ -54,11 +50,7 @@ services:
       - luminaul-net
 
   frontend:
-    build:
-      context: https://github.com/LuminaUL-Grupo3/luminaul-frontend.git#${FRONTEND_BRANCH:-main}
-      args:
-        NODE_VERSION: ${NODE_VERSION:-24-alpine}
-    image: luminaul-frontend:production
+    image: ${FRONTEND_IMAGE:-ghcr.io/luminaul-grupo3/luminaul-frontend:latest}
     container_name: luminaul-frontend
     restart: unless-stopped
     ports:
