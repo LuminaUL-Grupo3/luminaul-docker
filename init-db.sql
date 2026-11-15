@@ -84,13 +84,13 @@ CREATE TABLE profiles (
 
 CREATE TABLE profile_skills (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  skill_name VARCHAR(50) NOT NULL,
+  skill_name VARCHAR(100) NOT NULL,
   PRIMARY KEY (user_id, skill_name)
 );
 
 CREATE TABLE profile_interests (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  interest_name VARCHAR(50) NOT NULL,
+  interest_name VARCHAR(100) NOT NULL,
   PRIMARY KEY (user_id, interest_name)
 );
 
