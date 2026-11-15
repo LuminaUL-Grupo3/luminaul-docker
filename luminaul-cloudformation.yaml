@@ -2,10 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   LuminaUL - Plantilla de AWS CloudFormation de Grado de Producción (Industry-Grade).
   Despliegue inmutable y securizado para AWS Academy / Producción:
-  - Enforzamiento estricto de NODE_ENV=production y MAIL_TRANSPORT=smtp (sin mocks de desarrollo)
+  - Soporta MAIL_TRANSPORT=console (pruebas/logs) o MAIL_TRANSPORT=smtp (producción)
   - Hardening de seguridad CIS / AWS Well-Architected: IMDSv2 obligatorio, cabeceras OWASP en Caddy
   - Aprovisionamiento de disco EBS gp3 con rotación automática de logs de Docker (evita saturación de disco)
-  - Ajuste de kernel Linux (sysctl swappiness/cache) y SWAP de 4GB para estabilidad de compilación
+  - Ajuste de kernel Linux (sysctl swappiness/cache) y SWAP de 2GB para estabilidad de compilación
   - Resiliencia y auto-recuperación de IP dinámica vía servicio systemd con arranque supervisado.
 
 # ==============================================================================
@@ -23,6 +23,7 @@ Metadata:
       - Label:
           default: "2. Servicio Transaccional de Correo de Producción (SMTP)"
         Parameters:
+          - MailTransport
           - SmtpUser
           - SmtpPassword
           - SmtpHost
@@ -37,7 +38,6 @@ Metadata:
       - Label:
           default: "4. Parámetros de Seguridad y Computo"
         Parameters:
-          - JwtSecret
           - OpenAiApiKey
           - InstanceType
 
@@ -48,6 +48,8 @@ Metadata:
         default: "Token de DuckDNS"
       KeyName:
         default: "Key Pair EC2 (.pem)"
+      MailTransport:
+        default: "Modo de Correo OTP (console o smtp)"
       SmtpUser:
         default: "Usuario / Correo Remitente SMTP"
       SmtpPassword:
@@ -64,8 +66,6 @@ Metadata:
         default: "Rama de Producción Frontend"
       BackendBranch:
         default: "Rama de Producción Backend"
-      JwtSecret:
-        default: "Secreto Criptográfico JWT (HS256)"
       OpenAiApiKey:
         default: "OpenAI API Key (Opcional - Moderación Semántica)"
       InstanceType:
@@ -143,13 +143,6 @@ Parameters:
     Type: String
     Default: 'main'
 
-  JwtSecret:
-    Description: 'Secreto de firma HS256 para tokens de sesión (mínimo 32 caracteres criptográficos)'
-    Type: String
-    Default: 'LuminaUL_ProdSecretKey_EnterpriseGrade2026_Min32Chars!'
-    NoEcho: true
-    MinLength: 32
-
   OpenAiApiKey:
     Description: 'API Key de OpenAI para moderación semántica en segundo plano (dejar en blanco para degradación léxica local)'
     Type: String
@@ -159,11 +152,10 @@ Parameters:
   InstanceType:
     Description: 'Tipo de instancia EC2 para producción en AWS Academy'
     Type: String
-    Default: 't3.small'
+    Default: 't3.medium'
     AllowedValues:
+      - 't3.medium'
       - 't3.small'
-      - 't3.micro'
-      - 't2.micro'
 
   LatestUbuntuAmiId:
     Description: 'Resolución dinámica de la AMI oficial más reciente de Ubuntu 24.04 LTS (Noble Numbat)'
@@ -205,7 +197,11 @@ Resources:
         - Key: Environment
           Value: production
 
-  # 2. Instancia EC2 de Producción con Hardening y Provisión Inmutable
+  # 2. Canal de señalización de despliegue para verificación real de UserData
+  LuminaulWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  # 3. Instancia EC2 de Producción con Hardening y Provisión Inmutable
   LuminaulEC2Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -238,8 +234,30 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          set -e
+          set -eE -o pipefail
           exec > >(tee -a /var/log/luminaul-provision.log) 2>&1
+
+          WAIT_HANDLE_URL="${LuminaulWaitHandle}"
+          SIGNAL_SENT=0
+          signal_cfn() {
+            local status="$1"
+            local reason="$2"
+            if [ "$SIGNAL_SENT" -eq 1 ]; then
+              return 0
+            fi
+            SIGNAL_SENT=1
+            local payload
+            if command -v jq >/dev/null 2>&1; then
+              payload=$(jq -n --arg st "$status" --arg r "$reason" \
+                '{"Status":$st,"Reason":$r,"UniqueId":"luminaul-ec2-init","Data":"luminaul"}')
+            else
+              local safe_reason
+              safe_reason=$(printf '%s' "$reason" | tr '"' "'" | tr '\n' ' ')
+              payload="{\"Status\":\"$status\",\"Reason\":\"$safe_reason\",\"UniqueId\":\"luminaul-ec2-init\",\"Data\":\"luminaul\"}"
+            fi
+            curl -sS -X PUT -H 'Content-Type:' --data-binary "$payload" "$WAIT_HANDLE_URL" || true
+          }
+          trap 'EXIT_CODE=$?; signal_cfn "FAILURE" "Error de aprovisionamiento en linea $LINENO (exit $EXIT_CODE). Revisar /var/log/luminaul-provision.log"' ERR
 
           echo "=========================================================="
           echo "[LuminaUL Cloud Engine] Iniciando aprovisionamiento PROD"
@@ -247,9 +265,9 @@ Resources:
           echo "=========================================================="
 
           # 1. Configuración de Memoria Virtual y Tuning de Kernel Linux
-          echo "--> [1/8] Optimizando kernel Linux y memoria SWAP (4GB)..."
+          echo "--> [1/8] Optimizando kernel Linux y memoria SWAP (2GB)..."
           if [ ! -f /swapfile ]; then
-            fallocate -l 4G /swapfile
+            fallocate -l 2G /swapfile
             chmod 600 /swapfile
             mkswap /swapfile
             swapon /swapfile
@@ -269,7 +287,7 @@ Resources:
           echo "--> [2/8] Instalando Docker Engine y plugins oficiales..."
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -y
-          apt-get install -y ca-certificates curl gnupg git jq ufw
+          apt-get install -y ca-certificates curl gnupg git jq
           install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           chmod a+r /etc/apt/keyrings/docker.gpg
@@ -300,7 +318,7 @@ Resources:
           cd luminaul-docker
 
           # 5. Generación Segura de Variables de Entorno de Producción
-          # Modo estricto: NODE_ENV=production y MAIL_TRANSPORT=smtp obligatorios
+          # Modo estricto: NODE_ENV=production y MAIL_TRANSPORT explícito (console o smtp)
           echo "--> [5/8] Inyectando variables de entorno de producción..."
           cat << 'ENVEOF' > .env
           # Entorno Estricto
@@ -308,7 +326,7 @@ Resources:
           NODE_VERSION=24-alpine
           PORT=8000
 
-          # Base de Datos PostgreSQL 16 (Aislada en red interna)
+          # Base de Datos PostgreSQL 16 (Aislada en red interna, persistida en volumen Docker EBS)
           DB_USER=postgres
           DB_PASSWORD=LuminaSecurePass2026!
           DB_NAME=luminaul
@@ -316,14 +334,13 @@ Resources:
           DATABASE_SSL=false
 
           # Seguridad y Sesión JWT (HS256)
-          JWT_SECRET=${JwtSecret}
           JWT_EXPIRES_IN=86400
 
           # Dominio Público y CORS/WebSockets
           DOMAIN=${DuckDnsSubdomain}.duckdns.org
           DUCKDNS_SUBDOMAIN=${DuckDnsSubdomain}
           DUCKDNS_TOKEN=${DuckDnsToken}
-          WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
+          WEB_ORIGIN=https://${DuckDnsSubdomain}.duckdns.org,http://${DuckDnsSubdomain}.duckdns.org,http://localhost:5173,https://localhost:5173,http://127.0.0.1:5173,http://localhost,https://localhost,http://127.0.0.1,https://127.0.0.1
 
           # Servicio de Correo Transaccional (console o smtp)
           MAIL_TRANSPORT=${MailTransport}
@@ -341,6 +358,7 @@ Resources:
           BACKEND_BRANCH=${BackendBranch}
           FRONTEND_BRANCH=${FrontendBranch}
           ENVEOF
+          printf 'JWT_SECRET=%s\n' "$(openssl rand -base64 48 | tr -d '\n')" >> .env
 
           # Permisos estrictos: solo lectura por usuario y grupo docker
           chown -R ubuntu:docker /home/ubuntu/luminaul-docker
@@ -392,10 +410,46 @@ Resources:
           sudo docker compose build
           sudo systemctl start luminaul.service
 
+          echo "--> Verificando salud real de backend y frontend en Docker..."
+          BACKEND_OK=0
+          FRONTEND_OK=0
+          for i in $(seq 1 36); do
+            if curl -sf --max-time 3 http://127.0.0.1:8000/api/health >/dev/null 2>&1; then
+              BACKEND_OK=1
+            fi
+            FRONTEND_STATE=$(sudo docker inspect -f '{{.State.Running}}' luminaul-frontend 2>/dev/null || echo "false")
+            if [ "$FRONTEND_STATE" = "true" ]; then
+              FRONTEND_OK=1
+            fi
+            if [ "$BACKEND_OK" -eq 1 ] && [ "$FRONTEND_OK" -eq 1 ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$BACKEND_OK" -ne 1 ] || [ "$FRONTEND_OK" -ne 1 ]; then
+            echo "ERROR: Servicios no saludables tras 180s (BACKEND_OK=$BACKEND_OK, FRONTEND_OK=$FRONTEND_OK)"
+            sudo docker compose ps || true
+            sudo docker compose logs --tail=60 backend frontend || true
+            signal_cfn "FAILURE" "Backend (/api/health) o luminaul-frontend no quedaron saludables"
+            exit 1
+          fi
+
+          signal_cfn "SUCCESS" "LuminaUL aprovisionado y /api/health OK"
+
           echo "=========================================================="
           echo "[LuminaUL Cloud Engine] Despliegue de producción COMPLETADO"
           echo "Acceso: https://${DuckDnsSubdomain}.duckdns.org"
           echo "=========================================================="
+
+  # 4. Barrera de finalización real: el stack solo llega a CREATE_COMPLETE cuando /api/health responde OK
+  LuminaulWaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: LuminaulEC2Instance
+    Properties:
+      Handle: !Ref LuminaulWaitHandle
+      Timeout: '1200'
+      Count: 1
 
 # ==============================================================================
 # SALIDAS (OUTPUTS)
