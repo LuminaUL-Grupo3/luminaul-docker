@@ -77,18 +77,15 @@ Configura tus credenciales reales en `.env`:
 * `MAIL_TRANSPORT=smtp` con tus credenciales `SMTP_USER` y `SMTP_PASSWORD`
 * `JWT_SECRET` (mínimo 32 caracteres)
 
-#### 2.3 Compilación Secuencial Segura
+#### 2.3 Descarga de Imágenes y Arranque (`ghcr.io`)
 > [!IMPORTANT]
-> En servidores con poca RAM (`t3.small`), **compila siempre los servicios uno por uno** de forma secuencial para evitar saturar la memoria.
+> Las imágenes de producción se compilan automáticamente en **GitHub Actions** y se publican en **GitHub Container Registry (`ghcr.io`)** cada vez que hay un `push` a `main` en `luminaul-new-backend` o `luminaul-frontend`. La instancia EC2 **no compila código**: solo descarga las imágenes listas.
 
 ```bash
-# 1. Compilar backend NestJS
-docker compose build backend
+# 1. Descargar las imágenes precompiladas desde ghcr.io
+docker compose pull
 
-# 2. Compilar frontend React 19 + Caddy
-docker compose build frontend
-
-# 3. Levantar los 3 contenedores en segundo plano
+# 2. Levantar los 3 contenedores en segundo plano
 docker compose up -d
 ```
 
@@ -109,19 +106,19 @@ docker compose up -d
 
 ## 4. ¿Cómo actualizar cuando hay cambios nuevos en GitHub?
 
-Cuando se suban nuevos commits a las ramas de producción:
+El flujo usa **build automático en GitHub Actions + deploy manual en EC2** (ideal para AWS Academy, donde la IP de EC2 cambia en cada reinicio del laboratorio y no conviene guardarla en GitHub Secrets):
+
+1. Al hacer `push` a `main` en `luminaul-new-backend` o `luminaul-frontend`, el workflow `.github/workflows/docker-publish.yml` compila y publica automáticamente la nueva imagen `:latest` en `ghcr.io`.
+2. Entra por SSH a tu instancia EC2 y ejecuta:
 
 ```bash
 cd /home/ubuntu/luminaul-docker
 
-# 1. Reconstruir el backend sin caché
-docker compose build --no-cache backend
+# 1. Descargar las imágenes actualizadas desde ghcr.io
+docker compose pull
 
-# 2. Reconstruir el frontend sin caché
-docker compose build --no-cache frontend
-
-# 3. Reiniciar contenedores
-docker compose up -d backend frontend
+# 2. Recrear únicamente los contenedores que cambiaron
+docker compose up -d
 ```
 
 ---
