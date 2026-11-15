@@ -536,6 +536,10 @@ VALUES
   (gen_random_uuid(), 'travesti_de_mierda', 'high'),
   (gen_random_uuid(), 'indio_de_mierda', 'high'),
   (gen_random_uuid(), 'chapa_tu_cholo', 'high'),
+  (gen_random_uuid(), 'conero', 'high'),
+  (gen_random_uuid(), 'conera', 'high'),
+  (gen_random_uuid(), 'coneros', 'high'),
+  (gen_random_uuid(), 'coneras', 'high'),
 
   -- 8. Insultos, Acoso y Ofensas Verbales (High)
   (gen_random_uuid(), 'idiota', 'high'),
